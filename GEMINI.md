@@ -1,0 +1,3 @@
+# StackSoothe repository bridge
+
+This repository is StackSoothe W3 inside a containing private workflow workspace. Before work, locate the parent workspace with .workflow/active-challenge.json, read its AGENTS.md, active challenge docs, memory/w3-context.md and relevant .agents skills. Private plans/journal/session data stay in that parent workspace, not this public repo. Do not edit projects/solodesk. Parent approval/privacy/publication rules apply. If the parent workspace is unavailable, stop and ask the owner; don't fabricate or publicly copy its private contents. Verify rule loading behavior, not merely path existence.
