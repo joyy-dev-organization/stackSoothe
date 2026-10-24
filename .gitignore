@@ -43,3 +43,6 @@ service/dist/
 .env
 .env.*
 *.local
+.stacksoothe-token
+*.token
+service/.stacksoothe-token

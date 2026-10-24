@@ -1,0 +1,32 @@
+{
+  "cases": [
+    {
+      "id": "D1",
+      "name": "BuildContext async gap",
+      "errorLog": "lib/screens/profile_screen.dart:42:20: Error: Don't use 'BuildContext's across async gaps.\nNavigator.of(context).pop();\n               ^^^^^^^\nThe widget may have been removed from the tree before the async operation completes.",
+      "sourceCode": "Future<void> saveProfile() async {\n  await repository.saveProfile();\n  Navigator.of(context).pop();\n}",
+      "expectedSeverity": "medium"
+    },
+    {
+      "id": "D2",
+      "name": "Null check operator on null",
+      "errorLog": "Null check operator used on a null value\n#0      ProfileHeader.build (package:demo/widgets/profile_header.dart:28:31)",
+      "sourceCode": "Widget build(BuildContext context) {\n  final displayName = user!.displayName;\n  return Text(displayName);\n}",
+      "expectedSeverity": "high"
+    },
+    {
+      "id": "D3",
+      "name": "RenderFlex overflow",
+      "errorLog": "A RenderFlex overflowed by 36 pixels on the right.\nThe relevant error-causing widget was:\n  Row Row:file:///lib/screens/dashboard.dart:84:16",
+      "sourceCode": "Row(\n  children: [\n    const Icon(Icons.account_circle),\n    Text(user.displayName),\n    Text(user.email),\n  ],\n)",
+      "expectedSeverity": "low"
+    },
+    {
+      "id": "D5",
+      "name": "Unfamiliar Dart error outside canned demo",
+      "errorLog": "LateInitializationError: Field '_subscription@12345678' has not been initialized.\n#0 State.initState",
+      "sourceCode": "late final StreamSubscription _subscription;\nvoid dispose() { _subscription.cancel(); super.dispose(); }",
+      "expectedSeverity": "medium"
+    }
+  ]
+}

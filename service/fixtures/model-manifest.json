@@ -1,0 +1,17 @@
+{
+  "activeModel": "qwen2.5-coder:3b",
+  "license": "Qwen Research License",
+  "licenseNotice": "Check Qwen terms for commercial/distribution constraints. StackSoothe does not bundle model weights.",
+  "ollamaEndpoints": [
+    "/api/tags",
+    "/api/chat"
+  ],
+  "defaultBaseUrl": "http://127.0.0.1:11434",
+  "parameters": {
+    "temperature": 0.2,
+    "format": "json",
+    "stream": false
+  },
+  "contextWindow": 4096,
+  "hardwareTarget": "Windows 11 x64, 16 GB RAM, Intel UHD Graphics"
+}
