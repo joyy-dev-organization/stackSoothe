@@ -1,13 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../models/app_settings.dart';
 import '../models/diagnosis_result.dart';
+import '../models/notebook_entry.dart';
 import '../services/demo_diagnosis_service.dart';
 import '../services/diagnosis_client.dart';
+import '../services/notebook_store.dart';
+import '../services/settings_store.dart';
 import '../theme/app_theme.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  const HomeScreen({
+    super.key,
+    this.notebookStore,
+    this.settingsStore,
+    this.diagnosisClient,
+  });
+
+  final NotebookStore? notebookStore;
+  final SettingsStore? settingsStore;
+  final DiagnosisClient? diagnosisClient;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -27,10 +40,26 @@ The widget may have been removed from the tree before the async operation comple
   Navigator.of(context).pop();
 }''',
   );
+  final TextEditingController _projectController = TextEditingController(
+    text: 'default-flutter-app',
+  );
+  final TextEditingController _runtimeController = TextEditingController(
+    text: 'Flutter 3.x / Dart 3.x (Windows)',
+  );
+  final TextEditingController _verificationNoteController =
+      TextEditingController();
+
+  late final NotebookStore _notebookStore;
+  late final SettingsStore _settingsStore;
 
   bool _useLocalAi = false;
   bool _isDiagnosing = false;
   DiagnosisResult? _result;
+  NotebookEntry? _activeNotebookEntry;
+  NotebookLookupResult? _pendingSimilarLookup;
+  bool _isViewingStaleSimilar = false;
+  int _modelInvocationCount = 0;
+
   String? _errorMessage;
   String _serviceUrl = 'http://127.0.0.1:11435';
   String _serviceToken = '';
@@ -38,31 +67,109 @@ The widget may have been removed from the tree before the async operation comple
   String _activeNav = 'Diagnose';
 
   @override
+  void initState() {
+    super.initState();
+    _notebookStore = widget.notebookStore ?? NotebookStore();
+    _settingsStore = widget.settingsStore ?? SettingsStore();
+
+    _notebookStore.load();
+    final loadedSettings = _settingsStore.load();
+    _serviceUrl = loadedSettings.serviceUrl;
+    _model = loadedSettings.model;
+    _useLocalAi = loadedSettings.useLocalAi;
+    _projectController.text = loadedSettings.projectContext;
+    _runtimeController.text = loadedSettings.runtimeContext;
+  }
+
+  @override
   void dispose() {
     _errorController.dispose();
     _codeController.dispose();
+    _projectController.dispose();
+    _runtimeController.dispose();
+    _verificationNoteController.dispose();
     super.dispose();
   }
 
-  Future<void> _runDiagnosis() async {
+  void _persistSettings() {
+    _settingsStore.save(
+      AppSettings(
+        serviceUrl: _serviceUrl,
+        model: _model,
+        useLocalAi: _useLocalAi,
+        projectContext: _projectController.text.trim().isEmpty
+            ? 'default-flutter-app'
+            : _projectController.text.trim(),
+        runtimeContext: _runtimeController.text.trim().isEmpty
+            ? 'Flutter 3.x / Dart 3.x (Windows)'
+            : _runtimeController.text.trim(),
+      ),
+    );
+  }
+
+  Future<void> _runDiagnosis({bool forceFresh = false}) async {
     if (_errorController.text.trim().isEmpty) {
       setState(() => _errorMessage = 'Paste an error log before running a diagnosis.');
       return;
     }
 
+    _persistSettings();
+
+    if (!forceFresh) {
+      final lookup = _notebookStore.lookup(
+        errorLog: _errorController.text,
+        codeContext: _codeController.text,
+        projectContext: _projectController.text,
+        runtimeContext: _runtimeController.text,
+      );
+
+      if (lookup.kind == NotebookMatchKind.exact && lookup.exactEntry != null) {
+        final exact = lookup.exactEntry!;
+        setState(() {
+          _errorMessage = null;
+          _pendingSimilarLookup = null;
+          _isViewingStaleSimilar = false;
+          _activeNotebookEntry = exact;
+          _verificationNoteController.text = exact.verificationNote ?? '';
+          _result = exact.diagnosis.copyWith(
+            isRecalled: true,
+            recalledEntryId: exact.id,
+          );
+        });
+        return;
+      }
+
+      if (lookup.kind == NotebookMatchKind.similarContextChanged &&
+          lookup.similarEntries.isNotEmpty) {
+        setState(() {
+          _errorMessage = null;
+          _result = null;
+          _activeNotebookEntry = null;
+          _isViewingStaleSimilar = false;
+          _pendingSimilarLookup = lookup;
+        });
+        return;
+      }
+    }
+
     setState(() {
       _isDiagnosing = true;
       _errorMessage = null;
+      _pendingSimilarLookup = null;
+      _isViewingStaleSimilar = false;
     });
 
     try {
+      _modelInvocationCount++;
       final DiagnosisResult result;
-      if (_useLocalAi) {
-        result = await DiagnosisClient(
-          baseUrl: _serviceUrl,
-          token: _serviceToken,
-          model: _model,
-        ).diagnose(
+      if (_useLocalAi || widget.diagnosisClient != null) {
+        final client = widget.diagnosisClient ??
+            DiagnosisClient(
+              baseUrl: _serviceUrl,
+              token: _serviceToken,
+              model: _model,
+            );
+        result = await client.diagnose(
           errorLog: _errorController.text,
           sourceCode: _codeController.text,
         );
@@ -74,7 +181,11 @@ The widget may have been removed from the tree before the async operation comple
       }
 
       if (!mounted) return;
-      setState(() => _result = result);
+      setState(() {
+        _activeNotebookEntry = null;
+        _isViewingStaleSimilar = false;
+        _result = result.copyWith(isRecalled: false, recalledEntryId: null);
+      });
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -84,6 +195,85 @@ The widget may have been removed from the tree before the async operation comple
     } finally {
       if (mounted) setState(() => _isDiagnosing = false);
     }
+  }
+
+  void _saveCurrentToNotebook() {
+    final currentResult = _result;
+    if (currentResult == null) return;
+
+    final saved = _notebookStore.saveNewDiagnosis(
+      errorLog: _errorController.text,
+      codeContext: _codeController.text,
+      projectContext: _projectController.text,
+      runtimeContext: _runtimeController.text,
+      diagnosis: currentResult,
+    );
+
+    setState(() {
+      _activeNotebookEntry = saved;
+      _isViewingStaleSimilar = false;
+      _verificationNoteController.text = '';
+      _result = saved.diagnosis;
+    });
+  }
+
+  void _updateEntryVerification(VerificationStatus status) {
+    final active = _activeNotebookEntry;
+    if (active == null || _isViewingStaleSimilar) return;
+
+    final updated = _notebookStore.updateVerification(
+      entryId: active.id,
+      status: status,
+      verificationNote: _verificationNoteController.text,
+    );
+
+    setState(() {
+      _activeNotebookEntry = updated;
+      _result = updated.diagnosis;
+    });
+  }
+
+  void _deleteEntry(String entryId) {
+    _notebookStore.deleteEntry(entryId);
+    setState(() {
+      if (_activeNotebookEntry?.id == entryId) {
+        _activeNotebookEntry = null;
+        _result = null;
+        _isViewingStaleSimilar = false;
+      }
+    });
+  }
+
+  void _clearAllNotebookHistory() {
+    _notebookStore.clearAll();
+    setState(() {
+      _activeNotebookEntry = null;
+      _pendingSimilarLookup = null;
+      _isViewingStaleSimilar = false;
+      if (_result?.isRecalled == true) {
+        _result = null;
+      }
+    });
+  }
+
+  void _loadNotebookEntryIntoWorkspace(NotebookEntry entry) {
+    setState(() {
+      _activeNav = 'Diagnose';
+      _errorController.text = entry.errorLog;
+      _codeController.text = entry.codeContext;
+      _projectController.text = entry.projectContext;
+      _runtimeController.text = entry.runtimeContext;
+      _activeNotebookEntry = entry;
+      _pendingSimilarLookup = null;
+      _isViewingStaleSimilar = false;
+      _verificationNoteController.text = entry.verificationNote ?? '';
+      _result = entry.diagnosis.copyWith(
+        isRecalled: true,
+        recalledEntryId: entry.id,
+      );
+      _errorMessage = null;
+    });
+    _persistSettings();
   }
 
   String _cleanException(Object error) {
@@ -138,6 +328,9 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
       _errorController.text = example.log;
       _codeController.text = example.code;
       _result = null;
+      _activeNotebookEntry = null;
+      _pendingSimilarLookup = null;
+      _isViewingStaleSimilar = false;
       _errorMessage = null;
     });
   }
@@ -147,6 +340,9 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
       _errorController.clear();
       _codeController.clear();
       _result = null;
+      _activeNotebookEntry = null;
+      _pendingSimilarLookup = null;
+      _isViewingStaleSimilar = false;
       _errorMessage = null;
     });
   }
@@ -157,8 +353,8 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
     await Clipboard.setData(ClipboardData(text: result.toPlainText()));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Text('Diagnosis copied to clipboard'),
+      const SnackBar(
+        content: Text('Diagnosis copied to clipboard'),
         backgroundColor: AppColors.surfaceRaised,
         behavior: SnackBarBehavior.floating,
       ),
@@ -181,112 +377,117 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
           title: const Text('Local diagnosis service settings'),
           content: SizedBox(
             width: 500,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'StackSoothe routes prompts to your local loopback Node.js service (127.0.0.1) which connects to local Ollama.',
-                  style: TextStyle(color: AppColors.muted, height: 1.5),
-                ),
-                const SizedBox(height: 20),
-                const Text('SERVICE URL (LOOPBACK)', style: _eyebrowStyle),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: serviceUrlController,
-                  keyboardType: TextInputType.url,
-                  decoration: const InputDecoration(
-                    hintText: 'http://127.0.0.1:11435',
-                    prefixIcon: Icon(Icons.link_rounded),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'StackSoothe routes prompts to your local loopback Node.js service (127.0.0.1) which connects to local Ollama. Non-secret settings persist locally; your bearer token is kept in memory only and never written to disk.',
+                    style: TextStyle(color: AppColors.muted, height: 1.5),
                   ),
-                ),
-                const SizedBox(height: 16),
-                const Text('BEARER TOKEN (OPTIONAL)', style: _eyebrowStyle),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: tokenController,
-                  obscureText: true,
-                  decoration: const InputDecoration(
-                    hintText: 'Configured in .stacksoothe-token',
-                    prefixIcon: Icon(Icons.key_rounded),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                const Text('MODEL TAG', style: _eyebrowStyle),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: modelController,
-                  decoration: const InputDecoration(
-                    hintText: 'qwen2.5-coder:3b',
-                    prefixIcon: Icon(Icons.memory_rounded),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                if (connectionMessage != null)
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: AppColors.input,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: AppColors.border),
+                  const SizedBox(height: 20),
+                  const Text('SERVICE URL (LOOPBACK)', style: _eyebrowStyle),
+                  const SizedBox(height: 8),
+                  TextField(
+                    key: const Key('settings_service_url_field'),
+                    controller: serviceUrlController,
+                    keyboardType: TextInputType.url,
+                    decoration: const InputDecoration(
+                      hintText: 'http://127.0.0.1:11435',
+                      prefixIcon: Icon(Icons.link_rounded),
                     ),
-                    child: Text(
-                      connectionMessage!,
-                      style: TextStyle(
-                        fontSize: 12,
-                        height: 1.4,
-                        color: connectionMessage!.startsWith('Connected')
-                            ? AppColors.success
-                            : AppColors.warning,
+                  ),
+                  const SizedBox(height: 16),
+                  const Text('BEARER TOKEN (SESSION MEMORY ONLY)', style: _eyebrowStyle),
+                  const SizedBox(height: 8),
+                  TextField(
+                    key: const Key('settings_token_field'),
+                    controller: tokenController,
+                    obscureText: true,
+                    decoration: const InputDecoration(
+                      hintText: 'Configured in .stacksoothe-token (never saved to notebook)',
+                      prefixIcon: Icon(Icons.key_rounded),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text('MODEL TAG', style: _eyebrowStyle),
+                  const SizedBox(height: 8),
+                  TextField(
+                    key: const Key('settings_model_field'),
+                    controller: modelController,
+                    decoration: const InputDecoration(
+                      hintText: 'qwen2.5-coder:3b',
+                      prefixIcon: Icon(Icons.memory_rounded),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  if (connectionMessage != null)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: AppColors.input,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: AppColors.border),
+                      ),
+                      child: Text(
+                        connectionMessage!,
+                        style: TextStyle(
+                          fontSize: 12,
+                          height: 1.4,
+                          color: connectionMessage!.startsWith('Connected')
+                              ? AppColors.success
+                              : AppColors.warning,
+                        ),
                       ),
                     ),
-                  ),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    onPressed: testing
-                        ? null
-                        : () async {
-                            if (serviceUrlController.text.trim().isEmpty ||
-                                modelController.text.trim().isEmpty) {
-                              setDialogState(() => connectionMessage =
-                                  'Enter both a service URL and a model tag first.');
-                              return;
-                            }
-                            setDialogState(() {
-                              testing = true;
-                              connectionMessage = null;
-                            });
-                            try {
-                              final status = await DiagnosisClient(
-                                baseUrl: serviceUrlController.text,
-                                token: tokenController.text.trim(),
-                                model: modelController.text.trim(),
-                              ).testConnection();
-                              if (!dialogContext.mounted) return;
-                              setDialogState(() => connectionMessage = status);
-                            } catch (error) {
-                              if (!dialogContext.mounted) return;
-                              setDialogState(() => connectionMessage =
-                                  _cleanException(error));
-                            } finally {
-                              if (dialogContext.mounted) {
-                                setDialogState(() => testing = false);
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: testing
+                          ? null
+                          : () async {
+                              if (serviceUrlController.text.trim().isEmpty ||
+                                  modelController.text.trim().isEmpty) {
+                                setDialogState(() => connectionMessage =
+                                    'Enter both a service URL and a model tag first.');
+                                return;
                               }
-                            }
-                          },
-                    icon: testing
-                        ? const SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.cable_rounded, size: 16),
-                    label: Text(testing ? 'Testing connection…' : 'Test connection'),
+                              setDialogState(() {
+                                testing = true;
+                                connectionMessage = null;
+                              });
+                              try {
+                                final status = await DiagnosisClient(
+                                  baseUrl: serviceUrlController.text,
+                                  token: tokenController.text.trim(),
+                                  model: modelController.text.trim(),
+                                ).testConnection();
+                                if (!dialogContext.mounted) return;
+                                setDialogState(() => connectionMessage = status);
+                              } catch (error) {
+                                if (!dialogContext.mounted) return;
+                                setDialogState(() => connectionMessage =
+                                    _cleanException(error));
+                              } finally {
+                                if (dialogContext.mounted) {
+                                  setDialogState(() => testing = false);
+                                }
+                              }
+                            },
+                      icon: testing
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.cable_rounded, size: 16),
+                      label: Text(testing ? 'Testing connection…' : 'Test connection'),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
           actions: [
@@ -295,6 +496,7 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
               child: const Text('Cancel'),
             ),
             FilledButton(
+              key: const Key('save_settings_button'),
               onPressed: () {
                 if (serviceUrlController.text.trim().isEmpty ||
                     modelController.text.trim().isEmpty) {
@@ -307,6 +509,7 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
                   _serviceToken = tokenController.text.trim();
                   _model = modelController.text.trim();
                 });
+                _persistSettings();
                 Navigator.of(dialogContext).pop();
               },
               child: const Text('Save settings'),
@@ -336,20 +539,20 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
             children: [
               _ExplainerRow(
                 number: '01',
-                title: 'Bring the error',
-                body: 'Paste the complete log and any relevant Dart code.',
+                title: 'Bring the error & context',
+                body: 'Paste the complete log, relevant Dart code, and project/runtime context.',
               ),
               SizedBox(height: 18),
               _ExplainerRow(
                 number: '02',
-                title: 'Diagnose locally',
-                body: 'Use demo rules to explore the UI, or connect Ollama for actual local model inference.',
+                title: 'Recall or diagnose locally',
+                body: 'Exact repeat errors recall instantly with 0 model calls. Changed context flags similar past fixes for review before running inference.',
               ),
               SizedBox(height: 18),
               _ExplainerRow(
                 number: '03',
-                title: 'Verify the fix',
-                body: 'Use the suggested steps as guidance, then run your own analyzer or tests. StackSoothe never executes code.',
+                title: 'You control verification',
+                body: 'Saved fixes start UNVERIFIED. Only you mark a fix VERIFIED after running your own analyzer or tests. StackSoothe never executes code.',
               ),
             ],
           ),
@@ -390,25 +593,42 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  _buildPageHeading(),
-                                  const SizedBox(height: 24),
-                                  _buildModeCard(),
-                                  const SizedBox(height: 20),
-                                  _buildInputArea(),
-                                  const SizedBox(height: 14),
-                                  _buildExamples(),
-                                  const SizedBox(height: 22),
-                                  _buildActionRow(),
-                                  if (_errorMessage != null) ...[
-                                    const SizedBox(height: 16),
-                                    _buildErrorBanner(_errorMessage!),
+                                  if (_notebookStore.lastCorruptionWarning != null) ...[
+                                    _buildCorruptionWarningBanner(
+                                      _notebookStore.lastCorruptionWarning!,
+                                    ),
+                                    const SizedBox(height: 18),
                                   ],
-                                  const SizedBox(height: 30),
-                                  if (_isDiagnosing) _buildLoadingState(),
-                                  if (!_isDiagnosing && _result != null)
-                                    _buildResult(_result!),
-                                  if (!_isDiagnosing && _result == null && _errorMessage == null)
-                                    _buildEmptyResults(),
+                                  if (_activeNav == 'Notebook')
+                                    _buildNotebookView()
+                                  else ...[
+                                    _buildPageHeading(),
+                                    const SizedBox(height: 24),
+                                    _buildModeCard(),
+                                    const SizedBox(height: 20),
+                                    _buildInputArea(),
+                                    const SizedBox(height: 14),
+                                    _buildContextBar(),
+                                    const SizedBox(height: 14),
+                                    _buildExamples(),
+                                    const SizedBox(height: 22),
+                                    _buildActionRow(),
+                                    if (_errorMessage != null) ...[
+                                      const SizedBox(height: 16),
+                                      _buildErrorBanner(_errorMessage!),
+                                    ],
+                                    const SizedBox(height: 30),
+                                    if (_isDiagnosing) _buildLoadingState(),
+                                    if (!_isDiagnosing && _pendingSimilarLookup != null)
+                                      _buildSimilarMatchReviewCard(_pendingSimilarLookup!),
+                                    if (!_isDiagnosing && _result != null)
+                                      _buildResult(_result!),
+                                    if (!_isDiagnosing &&
+                                        _result == null &&
+                                        _pendingSimilarLookup == null &&
+                                        _errorMessage == null)
+                                      _buildEmptyResults(),
+                                  ],
                                   const SizedBox(height: 24),
                                   _buildFooterNote(),
                                 ],
@@ -428,7 +648,57 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
     );
   }
 
+  Widget _buildCorruptionWarningBanner(String warningText) {
+    return Container(
+      key: const Key('corruption_warning_banner'),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0x26FFC477),
+        borderRadius: BorderRadius.circular(11),
+        border: Border.all(color: AppColors.warning),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.restore_page_rounded, color: AppColors.warning, size: 20),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'RECOVERED FROM CORRUPT FIX NOTEBOOK STORE',
+                  style: TextStyle(
+                    color: AppColors.warning,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.9,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  warningText,
+                  style: const TextStyle(color: Color(0xFFE7D5B7), fontSize: 12, height: 1.45),
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            key: const Key('dismiss_corruption_warning_button'),
+            onPressed: () {
+              setState(() {
+                _notebookStore.dismissCorruptionWarning();
+              });
+            },
+            child: const Text('Dismiss'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildSidebar() {
+    final entryCount = _notebookStore.entries.length;
     return Container(
       width: 224,
       decoration: const BoxDecoration(
@@ -451,6 +721,12 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
             label: 'Diagnose',
             selected: _activeNav == 'Diagnose',
             onTap: () => setState(() => _activeNav = 'Diagnose'),
+          ),
+          _sidebarItem(
+            icon: Icons.menu_book_rounded,
+            label: 'Fix Notebook ($entryCount)',
+            selected: _activeNav == 'Notebook',
+            onTap: () => setState(() => _activeNav = 'Notebook'),
           ),
           _sidebarItem(
             icon: Icons.route_outlined,
@@ -479,7 +755,7 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
                 ),
                 SizedBox(height: 8),
                 Text(
-                  'Your code stays on your machine when you use a local model.',
+                  'Your code stays on your machine. Saved notebook entries are stored locally (unencrypted at rest; tokens never saved).',
                   style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.5),
                 ),
               ],
@@ -575,6 +851,7 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
   }
 
   Widget _buildTopBar(bool showSidebar) {
+    final notebookCount = _notebookStore.entries.length;
     return Container(
       height: 76,
       padding: EdgeInsets.symmetric(horizontal: showSidebar ? 30 : 18),
@@ -598,8 +875,17 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
             const Icon(Icons.chevron_right_rounded, size: 16, color: AppColors.subtle),
             const SizedBox(width: 5),
           ],
-          const Text('Diagnose', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+          Text(_activeNav, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
           const Spacer(),
+          OutlinedButton.icon(
+            key: const Key('open_notebook_button'),
+            onPressed: () => setState(() {
+              _activeNav = _activeNav == 'Notebook' ? 'Diagnose' : 'Notebook';
+            }),
+            icon: const Icon(Icons.menu_book_rounded, size: 15),
+            label: Text('Fix Notebook ($notebookCount)'),
+          ),
+          const SizedBox(width: 10),
           _statusPill(
             icon: _useLocalAi ? Icons.memory_rounded : Icons.science_outlined,
             label: _useLocalAi ? 'LOCAL MODEL' : 'SAMPLE MODE',
@@ -607,6 +893,7 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
           ),
           const SizedBox(width: 12),
           IconButton(
+            key: const Key('open_settings_button'),
             tooltip: 'Local model settings',
             onPressed: _openSettings,
             icon: const Icon(Icons.tune_rounded, size: 19),
@@ -662,16 +949,24 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
             runSpacing: 8,
             children: [
               _modeChip(
+                key: const Key('mode_demo_chip'),
                 selected: !_useLocalAi,
                 icon: Icons.science_outlined,
                 label: 'Demo mode',
-                onTap: () => setState(() => _useLocalAi = false),
+                onTap: () {
+                  setState(() => _useLocalAi = false);
+                  _persistSettings();
+                },
               ),
               _modeChip(
+                key: const Key('mode_local_ai_chip'),
                 selected: _useLocalAi,
                 icon: Icons.memory_rounded,
                 label: 'Local AI',
-                onTap: () => setState(() => _useLocalAi = true),
+                onTap: () {
+                  setState(() => _useLocalAi = true);
+                  _persistSettings();
+                },
               ),
             ],
           );
@@ -716,12 +1011,14 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
   }
 
   Widget _modeChip({
+    Key? key,
     required bool selected,
     required IconData icon,
     required String label,
     required VoidCallback onTap,
   }) {
     return Material(
+      key: key,
       color: selected ? const Color(0x269A8CFF) : AppColors.input,
       borderRadius: BorderRadius.circular(9),
       child: InkWell(
@@ -781,6 +1078,74 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
     );
   }
 
+  Widget _buildContextBar() {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(13),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final wide = constraints.maxWidth >= 700;
+          final projectField = Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('PROJECT CONTEXT (FINGERPRINT SCOPE)', style: _eyebrowStyle),
+              const SizedBox(height: 7),
+              TextField(
+                key: const Key('project_context_field'),
+                controller: _projectController,
+                onChanged: (_) => _persistSettings(),
+                style: const TextStyle(fontSize: 12),
+                decoration: const InputDecoration(
+                  isDense: true,
+                  hintText: 'e.g. stacksoothe-desktop',
+                  prefixIcon: Icon(Icons.folder_outlined, size: 16),
+                ),
+              ),
+            ],
+          );
+          final runtimeField = Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('RUNTIME / FLUTTER CONTEXT', style: _eyebrowStyle),
+              const SizedBox(height: 7),
+              TextField(
+                key: const Key('runtime_context_field'),
+                controller: _runtimeController,
+                onChanged: (_) => _persistSettings(),
+                style: const TextStyle(fontSize: 12),
+                decoration: const InputDecoration(
+                  isDense: true,
+                  hintText: 'e.g. Flutter 3.24 / Dart 3.5 (Windows)',
+                  prefixIcon: Icon(Icons.developer_board_rounded, size: 16),
+                ),
+              ),
+            ],
+          );
+          if (wide) {
+            return Row(
+              children: [
+                Expanded(child: projectField),
+                const SizedBox(width: 16),
+                Expanded(child: runtimeField),
+              ],
+            );
+          }
+          return Column(
+            children: [
+              projectField,
+              const SizedBox(height: 12),
+              runtimeField,
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   Widget _inputCard({
     required IconData icon,
     required String title,
@@ -833,6 +1198,7 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
     return SizedBox(
       height: 190,
       child: TextField(
+        key: const Key('error_log_field'),
         controller: _errorController,
         expands: true,
         minLines: null,
@@ -854,6 +1220,7 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
     return SizedBox(
       height: 190,
       child: TextField(
+        key: const Key('source_context_field'),
         controller: _codeController,
         expands: true,
         minLines: null,
@@ -907,25 +1274,31 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
       spacing: 14,
       runSpacing: 12,
       children: [
-        const Row(
+        Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.lock_outline_rounded, size: 14, color: AppColors.success),
-            SizedBox(width: 7),
-            Text('No cloud API · No code execution', style: TextStyle(color: AppColors.muted, fontSize: 11)),
+            const Icon(Icons.lock_outline_rounded, size: 14, color: AppColors.success),
+            const SizedBox(width: 7),
+            Text(
+              'No cloud API · No code execution · Model calls this session: $_modelInvocationCount',
+              key: const Key('session_model_call_counter'),
+              style: const TextStyle(color: AppColors.muted, fontSize: 11),
+            ),
           ],
         ),
         Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             OutlinedButton.icon(
+              key: const Key('clear_inputs_button'),
               onPressed: _clearInputs,
               icon: const Icon(Icons.refresh_rounded, size: 16),
               label: const Text('Clear'),
             ),
             const SizedBox(width: 9),
             FilledButton.icon(
-              onPressed: _isDiagnosing ? null : _runDiagnosis,
+              key: const Key('diagnose_button'),
+              onPressed: _isDiagnosing ? null : () => _runDiagnosis(forceFresh: false),
               icon: _isDiagnosing
                   ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF100D22)))
                   : const Icon(Icons.auto_awesome_rounded, size: 17),
@@ -934,6 +1307,97 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
           ],
         ),
       ],
+    );
+  }
+
+  Widget _buildSimilarMatchReviewCard(NotebookLookupResult lookup) {
+    final topCandidate = lookup.similarEntries.first;
+    final changedParts = <String>[
+      if (lookup.sourceChanged) 'source code snippet',
+      if (lookup.runtimeChanged) 'project/runtime context',
+    ].join(' and ');
+
+    return Container(
+      key: const Key('similar_match_review_card'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: const Color(0x1FFFC477),
+        borderRadius: BorderRadius.circular(13),
+        border: Border.all(color: AppColors.warning),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.history_edu_rounded, color: AppColors.warning, size: 20),
+              const SizedBox(width: 9),
+              const Expanded(
+                child: Text(
+                  'SIMILAR PAST ERROR FOUND — CONTEXT CHANGED (POTENTIALLY STALE)',
+                  style: TextStyle(
+                    color: AppColors.warning,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Text(
+                  'Past status: ${topCandidate.verificationStatus.toJsonValue()}',
+                  style: const TextStyle(fontSize: 10, color: AppColors.muted, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'This error signature matches "${topCandidate.diagnosis.title}" saved under '
+            'project "${topCandidate.projectContext}" (${topCandidate.runtimeContext}), '
+            'but your $changedParts changed. StackSoothe will not silently reuse a past fix when context changes.',
+            style: const TextStyle(color: Color(0xFFE7D5B7), fontSize: 12, height: 1.5),
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              OutlinedButton.icon(
+                key: const Key('review_similar_button'),
+                onPressed: () {
+                  setState(() {
+                    _activeNotebookEntry = topCandidate;
+                    _isViewingStaleSimilar = true;
+                    _pendingSimilarLookup = null;
+                    _verificationNoteController.text =
+                        topCandidate.verificationNote ?? '';
+                    _result = topCandidate.diagnosis.copyWith(
+                      isRecalled: true,
+                      recalledEntryId: topCandidate.id,
+                    );
+                  });
+                },
+                icon: const Icon(Icons.visibility_outlined, size: 16),
+                label: const Text('Review Similar Past Fix (Marked Stale)'),
+              ),
+              FilledButton.icon(
+                key: const Key('run_fresh_from_similar_button'),
+                onPressed: () => _runDiagnosis(forceFresh: true),
+                icon: const Icon(Icons.bolt_rounded, size: 16),
+                label: const Text('Run Fresh Diagnosis'),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -1018,6 +1482,7 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
   }
 
   Widget _buildResult(DiagnosisResult result) {
+    final entry = _activeNotebookEntry;
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
@@ -1028,6 +1493,10 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (entry != null && _isViewingStaleSimilar)
+            _buildStaleSimilarBanner(entry)
+          else if (entry != null && result.isRecalled)
+            _buildExactRecallBanner(entry),
           Container(
             padding: const EdgeInsets.fromLTRB(20, 18, 16, 18),
             decoration: const BoxDecoration(
@@ -1046,13 +1515,18 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('DIAGNOSIS REPORT', style: TextStyle(color: AppColors.muted, fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 1.15)),
+                      Text(
+                        result.isRecalled ? 'RECALLED DIAGNOSIS REPORT' : 'FRESH DIAGNOSIS REPORT',
+                        style: const TextStyle(color: AppColors.muted, fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 1.15),
+                      ),
                       const SizedBox(height: 4),
                       Text(result.title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, height: 1.3)),
                     ],
                   ),
                 ),
                 const SizedBox(width: 10),
+                _verificationStatusBadge(entry),
+                const SizedBox(width: 8),
                 _severityBadge(result.severity),
                 const SizedBox(width: 8),
                 IconButton(
@@ -1069,6 +1543,8 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                _buildNotebookLifecycleControls(entry),
+                const SizedBox(height: 18),
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(14),
@@ -1097,7 +1573,12 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
                     const SizedBox(width: 6),
                     Text('Confidence: ${result.confidence}', style: const TextStyle(color: AppColors.cyan, fontSize: 10, fontWeight: FontWeight.w700)),
                     const Spacer(),
-                    Text(result.isDemo ? 'RULE-BASED EXAMPLE' : 'MODEL: ${result.modelName.toUpperCase()}', style: const TextStyle(color: AppColors.subtle, fontSize: 9, letterSpacing: 0.6, fontWeight: FontWeight.w700)),
+                    Text(
+                      result.isDemo
+                          ? 'RULE-BASED EXAMPLE · PROMPT ${result.promptVersion}'
+                          : 'MODEL: ${result.modelName.toUpperCase()} · PROMPT ${result.promptVersion}',
+                      style: const TextStyle(color: AppColors.subtle, fontSize: 9, letterSpacing: 0.6, fontWeight: FontWeight.w700),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 22),
@@ -1170,6 +1651,399 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildExactRecallBanner(NotebookEntry entry) {
+    return Container(
+      key: const Key('recalled_exact_banner'),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      decoration: const BoxDecoration(
+        color: Color(0x1F56D39A),
+        border: Border(bottom: BorderSide(color: Color(0x5556D39A))),
+      ),
+      child: Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 12,
+        runSpacing: 8,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.bookmark_added_rounded, color: AppColors.success, size: 17),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  'RECALLED FROM FIX NOTEBOOK (EXACT MATCH — 0 MODEL CALLS) · '
+                  'Model: ${entry.modelName} · Prompt: ${entry.promptVersion}',
+                  style: const TextStyle(
+                    color: AppColors.success,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          TextButton.icon(
+            key: const Key('run_fresh_from_exact_button'),
+            onPressed: () => _runDiagnosis(forceFresh: true),
+            icon: const Icon(Icons.refresh_rounded, size: 15),
+            label: const Text('Run Fresh Diagnosis', style: TextStyle(fontSize: 11)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStaleSimilarBanner(NotebookEntry entry) {
+    return Container(
+      key: const Key('stale_similar_banner'),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      decoration: const BoxDecoration(
+        color: Color(0x26FFC477),
+        border: Border(bottom: BorderSide(color: AppColors.warning)),
+      ),
+      child: Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 12,
+        runSpacing: 8,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.warning_amber_rounded, color: AppColors.warning, size: 17),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  'SIMILAR MATCH — CONTEXT CHANGED (POTENTIALLY STALE, RE-VERIFICATION REQUIRED) · '
+                  'Saved under ${entry.projectContext} (${entry.runtimeContext})',
+                  style: const TextStyle(
+                    color: AppColors.warning,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          FilledButton.icon(
+            key: const Key('run_fresh_from_stale_banner_button'),
+            onPressed: () => _runDiagnosis(forceFresh: true),
+            icon: const Icon(Icons.bolt_rounded, size: 15),
+            label: const Text('Run Fresh Diagnosis', style: TextStyle(fontSize: 11)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _verificationStatusBadge(NotebookEntry? entry) {
+    if (entry == null) {
+      return Container(
+        key: const Key('status_unsaved_badge'),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        decoration: BoxDecoration(
+          color: AppColors.surfaceRaised,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: const Text(
+          'NOT SAVED',
+          style: TextStyle(color: AppColors.muted, fontSize: 9, fontWeight: FontWeight.w800),
+        ),
+      );
+    }
+
+    if (_isViewingStaleSimilar) {
+      return Container(
+        key: const Key('status_context_mismatch_badge'),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        decoration: BoxDecoration(
+          color: AppColors.warning.withValues(alpha: 0.14),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: AppColors.warning),
+        ),
+        child: const Text(
+          'CONTEXT MISMATCH · STALE',
+          style: TextStyle(color: AppColors.warning, fontSize: 9, fontWeight: FontWeight.w900),
+        ),
+      );
+    }
+
+    if (entry.isVerified) {
+      return Container(
+        key: const Key('status_verified_badge'),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        decoration: BoxDecoration(
+          color: AppColors.success.withValues(alpha: 0.14),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: AppColors.success),
+        ),
+        child: const Text(
+          'VERIFIED BY USER',
+          style: TextStyle(color: AppColors.success, fontSize: 9, fontWeight: FontWeight.w900),
+        ),
+      );
+    }
+
+    return Container(
+      key: const Key('status_unverified_badge'),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: AppColors.warning.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: AppColors.warning),
+      ),
+      child: const Text(
+        'UNVERIFIED',
+        style: TextStyle(color: AppColors.warning, fontSize: 9, fontWeight: FontWeight.w900),
+      ),
+    );
+  }
+
+  Widget _buildNotebookLifecycleControls(NotebookEntry? entry) {
+    if (entry == null) {
+      return Container(
+        padding: const EdgeInsets.all(13),
+        decoration: BoxDecoration(
+          color: AppColors.input,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Wrap(
+          alignment: WrapAlignment.spaceBetween,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 12,
+          runSpacing: 10,
+          children: [
+            const Text(
+              'Save this diagnosis to your local Fix Notebook for zero-call repeat lookup. New entries start UNVERIFIED.',
+              style: TextStyle(color: AppColors.muted, fontSize: 11),
+            ),
+            FilledButton.icon(
+              key: const Key('save_to_notebook_button'),
+              onPressed: _saveCurrentToNotebook,
+              icon: const Icon(Icons.bookmark_add_outlined, size: 16),
+              label: const Text('Save to Fix Notebook (Starts Unverified)'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_isViewingStaleSimilar) {
+      return Container(
+        padding: const EdgeInsets.all(13),
+        decoration: BoxDecoration(
+          color: AppColors.input,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppColors.warning),
+        ),
+        child: const Text(
+          'Viewing a similar past entry under changed source/runtime context. Run a fresh diagnosis or save a new entry for the current context before marking verified.',
+          style: TextStyle(color: Color(0xFFE7D5B7), fontSize: 11),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.input,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.verified_user_outlined, size: 15, color: AppColors.accent),
+              const SizedBox(width: 8),
+              Text(
+                entry.isVerified
+                    ? 'USER VERIFICATION: VERIFIED (${entry.verifiedAtIso ?? ''})'
+                    : 'USER VERIFICATION: UNVERIFIED (AI never self-certifies)',
+                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 0.7),
+              ),
+              const Spacer(),
+              TextButton.icon(
+                key: const Key('delete_active_entry_button'),
+                onPressed: () => _deleteEntry(entry.id),
+                icon: const Icon(Icons.delete_outline_rounded, size: 15, color: AppColors.danger),
+                label: const Text('Delete entry', style: TextStyle(color: AppColors.danger, fontSize: 11)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  key: const Key('verification_note_field'),
+                  controller: _verificationNoteController,
+                  style: const TextStyle(fontSize: 12),
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    hintText: 'Optional verification command/outcome (e.g., flutter test passed)',
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              if (!entry.isVerified)
+                FilledButton.icon(
+                  key: const Key('mark_verified_button'),
+                  onPressed: () => _updateEntryVerification(VerificationStatus.verified),
+                  icon: const Icon(Icons.check_circle_outline_rounded, size: 16),
+                  label: const Text('Mark Verified'),
+                )
+              else
+                OutlinedButton.icon(
+                  key: const Key('mark_unverified_button'),
+                  onPressed: () => _updateEntryVerification(VerificationStatus.unverified),
+                  icon: const Icon(Icons.undo_rounded, size: 16),
+                  label: const Text('Mark Unverified'),
+                ),
+            ],
+          ),
+          if (entry.verificationNote != null && entry.verificationNote!.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Recorded verification outcome: ${entry.verificationNote}',
+              key: const Key('recorded_verification_note_text'),
+              style: const TextStyle(color: AppColors.success, fontSize: 11),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNotebookView() {
+    final entries = _notebookStore.entries;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('LOCAL FIX NOTEBOOK', style: TextStyle(color: AppColors.accent, fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 1.4)),
+                  SizedBox(height: 8),
+                  Text('Saved diagnoses & verification state', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
+                ],
+              ),
+            ),
+            if (entries.isNotEmpty)
+              OutlinedButton.icon(
+                key: const Key('clear_all_notebook_button'),
+                onPressed: _clearAllNotebookHistory,
+                icon: const Icon(Icons.delete_sweep_outlined, size: 16, color: AppColors.danger),
+                label: const Text('Clear All History', style: TextStyle(color: AppColors.danger)),
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Storage path: ${_notebookStore.notebookFile.path} (unencrypted at rest; runtime bearer tokens are never stored).',
+          style: const TextStyle(color: AppColors.muted, fontSize: 11),
+        ),
+        const SizedBox(height: 20),
+        if (entries.isEmpty)
+          Container(
+            key: const Key('empty_notebook_placeholder'),
+            width: double.infinity,
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(13),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: const Text(
+              'No saved diagnoses in your Fix Notebook yet. Run a diagnosis and click "Save to Fix Notebook".',
+              style: TextStyle(color: AppColors.muted, fontSize: 12),
+            ),
+          )
+        else
+          ...entries.map((entry) => Container(
+                key: Key('notebook_row_${entry.id}'),
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Text(
+                                entry.diagnosis.title,
+                                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+                              ),
+                              const SizedBox(width: 10),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: (entry.isVerified ? AppColors.success : AppColors.warning)
+                                      .withValues(alpha: 0.14),
+                                  borderRadius: BorderRadius.circular(5),
+                                ),
+                                child: Text(
+                                  entry.verificationStatus.toJsonValue(),
+                                  style: TextStyle(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w900,
+                                    color: entry.isVerified ? AppColors.success : AppColors.warning,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Project: ${entry.projectContext} · Runtime: ${entry.runtimeContext} · '
+                            'Model: ${entry.modelName} (prompt ${entry.promptVersion})',
+                            style: const TextStyle(color: AppColors.muted, fontSize: 11),
+                          ),
+                          if (entry.verificationNote != null && entry.verificationNote!.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              'Verification note: ${entry.verificationNote}',
+                              style: const TextStyle(color: AppColors.success, fontSize: 11),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    OutlinedButton(
+                      key: Key('load_entry_${entry.id}'),
+                      onPressed: () => _loadNotebookEntryIntoWorkspace(entry),
+                      child: const Text('Load'),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      key: Key('delete_entry_${entry.id}'),
+                      tooltip: 'Delete entry',
+                      onPressed: () => _deleteEntry(entry.id),
+                      icon: const Icon(Icons.delete_outline_rounded, color: AppColors.danger),
+                    ),
+                  ],
+                ),
+              )),
+      ],
     );
   }
 
@@ -1250,7 +2124,7 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
         const SizedBox(width: 8),
         const Expanded(
           child: Text(
-            'StackSoothe is an early prototype. Demo mode uses built-in rules; Local AI mode requires Ollama and a downloaded model. Your diagnosis is guidance, not a guarantee.',
+            'StackSoothe is local-first. Demo mode uses built-in rules; Local AI mode requires Ollama. Fix Notebook and settings are stored locally under %LOCALAPPDATA%\\StackSoothe (unencrypted at rest; bearer tokens are never saved to disk).',
             style: TextStyle(color: AppColors.subtle, fontSize: 10, height: 1.55),
           ),
         ),

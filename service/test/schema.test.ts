@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DiagnosisSchema, DiagnoseRequestSchema } from '../src/schemas/diagnosis.schema.ts';
+import { PROMPT_VERSION, runDiagnosis } from '../src/diagnosis.ts';
 
 test('DiagnosisSchema: validates a conforming diagnosis object', () => {
   const validData = {
@@ -87,4 +88,14 @@ test('DiagnoseRequestSchema: rejects empty errorLog', () => {
   const emptyRequest = { errorLog: '   ' };
   const result = DiagnoseRequestSchema.safeParse(emptyRequest);
   assert.equal(result.success, false);
+});
+
+test('runDiagnosis: includes prompt_version provenance in meta envelope', async () => {
+  const envelope = await runDiagnosis({
+    errorLog: 'LateInitializationError: Field not initialized',
+    baseUrl: 'http://127.0.0.1:1', // Unreachable port
+  });
+  assert.equal(envelope.success, false);
+  assert.equal(envelope.meta.prompt_version, PROMPT_VERSION);
+  assert.equal(envelope.meta.prompt_version, 'v1.0.0');
 });

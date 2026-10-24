@@ -3,16 +3,33 @@ import 'dart:io';
 
 import '../models/diagnosis_result.dart';
 
+typedef DiagnosisHandler = Future<DiagnosisResult> Function({
+  required String errorLog,
+  required String sourceCode,
+  required String model,
+});
+
 class DiagnosisClient {
   DiagnosisClient({
     this.baseUrl = 'http://127.0.0.1:11435',
     this.token = '',
     this.model = 'qwen2.5-coder:3b',
+    this.customHandler,
   });
 
   final String baseUrl;
   final String token;
   final String model;
+  final DiagnosisHandler? customHandler;
+
+  int _invocationCount = 0;
+
+  /// Number of times [diagnose] was invoked on this client instance.
+  int get invocationCount => _invocationCount;
+
+  void resetInvocationCount() {
+    _invocationCount = 0;
+  }
 
   String get _rootUrl => baseUrl.trim().replaceFirst(RegExp(r'/+$'), '');
 
@@ -20,6 +37,16 @@ class DiagnosisClient {
     required String errorLog,
     required String sourceCode,
   }) async {
+    _invocationCount++;
+
+    if (customHandler != null) {
+      return customHandler!(
+        errorLog: errorLog,
+        sourceCode: sourceCode,
+        model: model,
+      );
+    }
+
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 10);
 

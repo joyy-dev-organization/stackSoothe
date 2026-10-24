@@ -10,6 +10,7 @@ export interface DiagnosisEnvelope {
   };
   meta: {
     model: string;
+    prompt_version: string;
     raw_valid: boolean;
     repaired: boolean;
     duration_ms: number;

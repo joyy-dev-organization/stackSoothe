@@ -9,7 +9,10 @@ class DiagnosisResult {
     required this.verification,
     this.codeExample = '',
     this.modelName = 'Demo rules',
+    this.promptVersion = 'demo-v1',
     this.isDemo = true,
+    this.isRecalled = false,
+    this.recalledEntryId,
   });
 
   final String title;
@@ -21,7 +24,111 @@ class DiagnosisResult {
   final List<String> verification;
   final String codeExample;
   final String modelName;
+  final String promptVersion;
   final bool isDemo;
+  final bool isRecalled;
+  final String? recalledEntryId;
+
+  DiagnosisResult copyWith({
+    String? title,
+    String? severity,
+    String? summary,
+    String? likelyCause,
+    String? confidence,
+    List<String>? steps,
+    List<String>? verification,
+    String? codeExample,
+    String? modelName,
+    String? promptVersion,
+    bool? isDemo,
+    bool? isRecalled,
+    String? recalledEntryId,
+  }) {
+    return DiagnosisResult(
+      title: title ?? this.title,
+      severity: severity ?? this.severity,
+      summary: summary ?? this.summary,
+      likelyCause: likelyCause ?? this.likelyCause,
+      confidence: confidence ?? this.confidence,
+      steps: steps ?? this.steps,
+      verification: verification ?? this.verification,
+      codeExample: codeExample ?? this.codeExample,
+      modelName: modelName ?? this.modelName,
+      promptVersion: promptVersion ?? this.promptVersion,
+      isDemo: isDemo ?? this.isDemo,
+      isRecalled: isRecalled ?? this.isRecalled,
+      recalledEntryId: recalledEntryId ?? this.recalledEntryId,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'title': title,
+      'severity': severity,
+      'summary': summary,
+      'likely_cause': likelyCause,
+      'confidence': confidence,
+      'steps': steps,
+      'verification': verification,
+      'code_example': codeExample,
+      'model_name': modelName,
+      'prompt_version': promptVersion,
+      'is_demo': isDemo,
+    };
+  }
+
+  /// Strict deserialization for saved Fix Notebook entries (throws FormatException
+  /// if required fields are missing or invalid rather than substituting silent fallbacks).
+  factory DiagnosisResult.fromNotebookJson(
+    Map<String, dynamic> json, {
+    bool isRecalled = true,
+    String? recalledEntryId,
+  }) {
+    String requireString(String key) {
+      final val = json[key];
+      if (val is! String || val.trim().isEmpty) {
+        throw FormatException('Missing or invalid notebook diagnosis field: $key');
+      }
+      return val;
+    }
+
+    List<String> requireStringList(String key) {
+      final val = json[key];
+      if (val is! List || val.isEmpty) {
+        throw FormatException('Missing or invalid notebook diagnosis list: $key');
+      }
+      final list = val
+          .whereType<String>()
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
+      if (list.isEmpty) {
+        throw FormatException('Empty string list for notebook field: $key');
+      }
+      return list;
+    }
+
+    final severity = requireString('severity').toLowerCase();
+    if (!const {'low', 'medium', 'high'}.contains(severity)) {
+      throw FormatException('Invalid notebook diagnosis severity: $severity');
+    }
+
+    return DiagnosisResult(
+      title: requireString('title'),
+      severity: severity,
+      summary: requireString('summary'),
+      likelyCause: requireString('likely_cause'),
+      confidence: requireString('confidence'),
+      steps: requireStringList('steps'),
+      verification: requireStringList('verification'),
+      codeExample: (json['code_example'] as String?) ?? '',
+      modelName: (json['model_name'] as String?) ?? 'unknown-model',
+      promptVersion: (json['prompt_version'] as String?) ?? 'v1.0.0',
+      isDemo: json['is_demo'] == true,
+      isRecalled: isRecalled,
+      recalledEntryId: recalledEntryId,
+    );
+  }
 
   factory DiagnosisResult.fromJson(
     Map<String, dynamic> json, {
@@ -73,6 +180,7 @@ class DiagnosisResult {
       ]),
       codeExample: stringValue('code_example', ''),
       modelName: modelName,
+      promptVersion: 'v1.0.0',
       isDemo: false,
     );
   }
@@ -80,12 +188,14 @@ class DiagnosisResult {
   factory DiagnosisResult.fromEnvelope(Map<String, dynamic> envelope) {
     if (envelope['success'] != true) {
       final err = envelope['error'];
-      final message = err is Map ? err['message'] ?? 'Diagnosis failed' : 'Diagnosis failed';
+      final message =
+          err is Map ? err['message'] ?? 'Diagnosis failed' : 'Diagnosis failed';
       throw Exception(message);
     }
     final data = envelope['data'] as Map<String, dynamic>? ?? {};
     final meta = envelope['meta'] as Map<String, dynamic>? ?? {};
     final model = meta['model'] as String? ?? 'qwen2.5-coder:3b';
+    final promptVersion = meta['prompt_version'] as String? ?? 'v1.0.0';
     final repaired = meta['repaired'] == true;
 
     return DiagnosisResult(
@@ -94,10 +204,14 @@ class DiagnosisResult {
       summary: data['summary'] as String? ?? '',
       likelyCause: data['likely_cause'] as String? ?? '',
       confidence: data['confidence'] as String? ?? 'Medium',
-      steps: (data['steps'] as List?)?.map((e) => e.toString()).toList() ?? const [],
-      verification: (data['verification'] as List?)?.map((e) => e.toString()).toList() ?? const [],
+      steps:
+          (data['steps'] as List?)?.map((e) => e.toString()).toList() ?? const [],
+      verification:
+          (data['verification'] as List?)?.map((e) => e.toString()).toList() ??
+              const [],
       codeExample: data['code_example'] as String? ?? '',
       modelName: repaired ? '$model (auto-repaired)' : model,
+      promptVersion: promptVersion,
       isDemo: false,
     );
   }
@@ -134,7 +248,9 @@ class DiagnosisResult {
     }
     buffer
       ..writeln()
-      ..writeln('Generated by ${isDemo ? 'StackSoothe demo mode' : modelName}.');
+      ..writeln(
+        'Generated by ${isDemo ? 'StackSoothe demo mode' : modelName} (prompt $promptVersion)${isRecalled ? ' — Recalled from Fix Notebook' : ''}.',
+      );
     return buffer.toString();
   }
 }

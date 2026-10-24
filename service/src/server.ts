@@ -41,6 +41,7 @@ function validateHost(hostHeader: string | undefined, port: number): boolean {
 export function createServer(customToken?: string, customPort?: number, ollamaBaseUrl?: string) {
   const token = customToken ?? authToken;
   const port = customPort ?? PORT;
+  let diagnosisRequestCount = 0;
 
   const server = http.createServer((req, res) => {
     // 1. Enforce exact Host header
@@ -60,7 +61,14 @@ export function createServer(customToken?: string, customPort?: number, ollamaBa
     // 3. Health check (no auth needed for readiness probe)
     if (req.method === 'GET' && req.url === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'ok', service: 'stacksoothe-service', busy: isInferring }));
+      res.end(
+        JSON.stringify({
+          status: 'ok',
+          service: 'stacksoothe-service',
+          busy: isInferring,
+          diagnosis_request_count: diagnosisRequestCount,
+        })
+      );
       return;
     }
 
@@ -128,6 +136,7 @@ export function createServer(customToken?: string, customPort?: number, ollamaBa
         }
 
         isInferring = true;
+        diagnosisRequestCount++;
         try {
           const envelope = await runDiagnosis({
             errorLog: inputValidation.data.errorLog,
