@@ -95,7 +95,7 @@ The widget may have been removed from the tree before the async operation comple
   String? _errorMessage;
   String _serviceUrl = 'http://127.0.0.1:11435';
   String _serviceToken = '';
-  String _model = 'qwen2.5-coder:3b';
+  String _model = 'qwen3:1.7b';
   String _activeNav = 'Diagnose';
 
   @override
@@ -576,7 +576,7 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
                     key: const Key('settings_model_field'),
                     controller: modelController,
                     decoration: const InputDecoration(
-                      hintText: 'qwen2.5-coder:3b',
+                      hintText: 'qwen3:1.7b',
                       prefixIcon: Icon(Icons.memory_rounded),
                     ),
                   ),

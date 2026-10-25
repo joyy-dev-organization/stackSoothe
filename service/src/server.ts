@@ -11,13 +11,20 @@ const HOST = '127.0.0.1';
 const MAX_BODY_BYTES = 100 * 1024; // 100 KB limit
 
 // Generate or retrieve bearer token
+const tokenFile = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../.stacksoothe-token'
+);
 let authToken = process.env.STACKSOOTHE_TOKEN;
+if (!authToken && fs.existsSync(tokenFile)) {
+  try {
+    authToken = fs.readFileSync(tokenFile, 'utf8').trim();
+  } catch {
+    // Ignore if read fails
+  }
+}
 if (!authToken) {
   authToken = crypto.randomBytes(24).toString('hex');
-  const tokenFile = path.resolve(
-    path.dirname(fileURLToPath(import.meta.url)),
-    '../.stacksoothe-token'
-  );
   try {
     fs.writeFileSync(tokenFile, authToken, { mode: 0o600 });
   } catch {

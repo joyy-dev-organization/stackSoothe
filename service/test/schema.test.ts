@@ -81,7 +81,7 @@ test('DiagnoseRequestSchema: validates request inputs and defaults', () => {
 
   const parsed = DiagnoseRequestSchema.parse(validRequest);
   assert.equal(parsed.errorLog, validRequest.errorLog);
-  assert.equal(parsed.model, 'qwen2.5-coder:3b');
+  assert.equal(parsed.model, 'qwen3:1.7b');
 });
 
 test('DiagnoseRequestSchema: rejects empty errorLog', () => {

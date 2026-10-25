@@ -11,7 +11,7 @@ class AppSettings {
 
   const AppSettings({
     this.serviceUrl = 'http://127.0.0.1:11435',
-    this.model = 'qwen2.5-coder:3b',
+    this.model = 'qwen3:1.7b',
     this.useLocalAi = false,
     this.projectContext = 'default-flutter-app',
     this.runtimeContext = 'Flutter 3.x / Dart 3.x (Windows)',

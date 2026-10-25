@@ -28,7 +28,7 @@ export type DiagnosisData = z.infer<typeof DiagnosisSchema>;
 export const DiagnoseRequestSchema = z.object({
   errorLog: z.string().trim().min(1, 'Error log is required').max(50000),
   sourceCode: z.string().max(50000).default(''),
-  model: z.string().trim().min(1).default('qwen2.5-coder:3b'),
+  model: z.string().trim().min(1).default('qwen3:1.7b'),
 });
 
 export type DiagnoseRequest = z.infer<typeof DiagnoseRequestSchema>;
