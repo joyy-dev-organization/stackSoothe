@@ -1,0 +1,43 @@
+{
+    "project":  "StackSoothe",
+    "release_tag":  "v0.1.0-challenge",
+    "commit_sha":  "062d10830637b234afd55a65513809c10e98f3ef",
+    "build_timestamp":  "2026-10-25T17:11:14Z",
+    "platform":  "windows-x64",
+    "architecture":  "Flutter Desktop + Loopback Node/TypeScript + Local Ollama",
+    "license":  "MIT",
+    "prerequisites":  {
+                          "os":  "Windows 10 or 11 (64-bit)",
+                          "node":  "\u003e=24.0.0",
+                          "ollama":  "\u003e=0.40.8",
+                          "model":  "qwen3:1.7b (ID: 8f68893c685c, Apache-2.0)",
+                          "ram":  "\u003e=8 GB (16 GB recommended)"
+                      },
+    "assets":  [
+                   {
+                       "filename":  "stacksoothe-v0.1.0-challenge-windows-x64.zip",
+                       "size_bytes":  13936679,
+                       "size_mb":  13.29,
+                       "sha256":  "af8a45f1506fad69f499db001543a533bd6bc239237ec2ad581eab2b6989a86e",
+                       "description":  "Standalone packaged Windows release candidate containing Flutter runner, runtime DLLs, compiled assets, loopback service, and launchers"
+                   },
+                   {
+                       "filename":  "stacksoothe.exe",
+                       "size_bytes":  89600,
+                       "sha256":  "3ab9e272f5d0200cc675f1e33da4ab72e8241e943fee55b8471b3c8541db50e2",
+                       "description":  "Windows native x64 Flutter desktop application executable"
+                   },
+                   {
+                       "filename":  "flutter_windows.dll",
+                       "size_bytes":  21284352,
+                       "sha256":  "a147927018fcc1a843fb3938ead58838d2e185ce7d840bc4191a7a1b90c21015",
+                       "description":  "Flutter Windows engine runtime dynamic library"
+                   },
+                   {
+                       "filename":  "app.so",
+                       "size_bytes":  5620624,
+                       "sha256":  "0e2937bc15d7ea8422d6ac3708e020404a3d8f36c6570c859394ec65a32f66a2",
+                       "description":  "AOT-compiled Flutter Dart application binary"
+                   }
+               ]
+}

@@ -3,10 +3,10 @@
   "version": "0.1.0",
   "description": "Local loopback Node/TypeScript diagnosis service for StackSoothe",
   "type": "module",
-  "main": "dist/server.js",
+  "main": "src/server.ts",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/server.js",
+    "start": "node --experimental-strip-types src/server.ts",
     "dev": "node --experimental-strip-types src/server.ts",
     "test": "node --test --experimental-strip-types test/*.test.ts",
     "test:unit": "node --test --experimental-strip-types test/schema.test.ts test/security.test.ts",
