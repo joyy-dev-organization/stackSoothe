@@ -58,36 +58,42 @@ StackSoothe uses a decoupled, local-first loopback architecture:
 
 ## Standalone Windows Release Candidate
 
-A pre-packaged, standalone Windows x64 release candidate is available for immediate use without requiring Flutter or MSVC development tools:
+A pre-packaged, standalone Windows x64 release candidate is available with a **one-click launcher** and bundled Node.js runtime (no separate Node/npm, Flutter, or MSVC installation required):
 
 - **Release Tag**: [`v0.1.0-challenge`](https://github.com/joyy-dev-organization/stackSoothe/releases/tag/v0.1.0-challenge)
-- **Archive File**: `stacksoothe-v0.1.0-challenge-windows-x64.zip` (13.29 MB)
-- **Archive SHA-256**: `af8a45f1506fad69f499db001543a533bd6bc239237ec2ad581eab2b6989a86e`
+- **Archive File**: `stacksoothe-v0.1.0-challenge-windows-x64.zip` (45.84 MB)
+- **Archive SHA-256**: `69228523917031727c3ec917d735bb38594c5b52cc3ba59fd31b05b2906c6a45`
 
 ### Asset Checksum Manifest (`release-manifest.json`)
 
 | Component | File Path | Size | SHA-256 Checksum |
 |---|---|---|---|
-| Complete Archive | `stacksoothe-v0.1.0-challenge-windows-x64.zip` | 13.29 MB | `af8a45f1506fad69f499db001543a533bd6bc239237ec2ad581eab2b6989a86e` |
+| Complete Archive | `stacksoothe-v0.1.0-challenge-windows-x64.zip` | 45.84 MB | `69228523917031727c3ec917d735bb38594c5b52cc3ba59fd31b05b2906c6a45` |
 | Native Runner | `app/stacksoothe.exe` | 89.6 KB | `3ab9e272f5d0200cc675f1e33da4ab72e8241e943fee55b8471b3c8541db50e2` |
 | Flutter Engine | `app/flutter_windows.dll` | 21.28 MB | `a147927018fcc1a843fb3938ead58838d2e185ce7d840bc4191a7a1b90c21015` |
 | Dart AOT Code | `app/data/app.so` | 5.62 MB | `0e2937bc15d7ea8422d6ac3708e020404a3d8f36c6570c859394ec65a32f66a2` |
+| Bundled Node Runtime | `runtime/node.exe` | 91.38 MB | `63c259c81e5d472b5f11c8d506070130cb04a1ecf84b80377a34ed6ec9048088` |
 
 ### System Requirements
 - **OS**: Windows 10 or 11 (64-bit)
-- **Node.js**: v24.0.0 or higher in system PATH ([nodejs.org](https://nodejs.org/))
+- **Node.js**: Bundled inside package (`runtime/node.exe`, Node v24.14.0; no installation needed)
 - **Ollama**: v0.40.8 or higher ([ollama.com](https://ollama.com/))
 - **Local Model**: `qwen3:1.7b` (run `ollama run qwen3:1.7b`)
 - **Memory**: 8 GB RAM minimum (16 GB recommended for resident model weights)
 
-### Quick Start
+### Quick Start (One-Click Launcher)
 1. Ensure Ollama is running with `qwen3:1.7b`:
    ```powershell
    ollama run qwen3:1.7b
    ```
 2. Download and extract `stacksoothe-v0.1.0-challenge-windows-x64.zip`.
-3. Double-click **`launch.bat`**. The launcher automatically starts the local loopback service, verifies health, and opens the desktop interface.
-4. To shut down cleanly, double-click **`stop.bat`**.
+3. Double-click **`start-stacksoothe.bat`**. The launcher automatically:
+   - Verifies prerequisites.
+   - Spawns the local Node diagnosis service in the background on loopback `127.0.0.1:11435`.
+   - Polls verified `/health` readiness.
+   - Launches the Flutter desktop interface.
+   - When you close the app window, the owned background service terminates automatically.
+4. (Optional) Run **`stop.bat`** to manually terminate any background processes if needed.
 
 ---
 

@@ -4,15 +4,19 @@
   Theme: "Slow and Steady" — Open-Source AI Hacktoberfest 2026
 ========================================================================
 
-QUICK START:
+QUICK START (ONE-CLICK LAUNCHER):
 1. Ensure Ollama is running with qwen3:1.7b:
      ollama run qwen3:1.7b
-2. Double-click "launch.bat" to start both the local service and desktop app.
-3. To cleanly stop both processes, run "stop.bat".
+2. Double-click "start-stacksoothe.bat" to launch everything in one click!
+   - Checks prerequisites automatically.
+   - Starts the local diagnosis service in the background.
+   - Launches the Flutter desktop interface.
+   - When you close the app window, the background service stops automatically!
+3. (Optional) Run "stop.bat" to manually terminate any lingering processes.
 
 SYSTEM REQUIREMENTS:
 - Windows 10 or 11 (64-bit)
-- Node.js v24.0.0 or higher in PATH (https://nodejs.org/)
+- Bundled Node.js runtime included (no separate Node/npm install needed)
 - Ollama v0.40.8 or higher with qwen3:1.7b (https://ollama.com/)
 - Minimum 8 GB RAM (16 GB recommended for local model weights)
 

@@ -17,8 +17,15 @@ $StagingDir = Join-Path $DistDir "staging\stacksoothe-$ReleaseTag-windows-x64"
 $ZipPath = Join-Path $DistDir "stacksoothe-$ReleaseTag-windows-x64.zip"
 $ManifestPath = Join-Path $RepoRoot "release-manifest.json"
 
-# 1. Verify required build artifacts exist
-Write-Host "`n[1/6] Verifying built binaries..." -ForegroundColor Yellow
+# 1. Verify required build artifacts and runtime exist
+Write-Host "`n[1/6] Verifying built binaries and Node runtime..." -ForegroundColor Yellow
+
+$NodeSource = (Get-Command node -ErrorAction SilentlyContinue)
+if (-not $NodeSource) {
+    throw "Node.js executable was not found on host machine. Node v24 is required to bundle the standalone runtime."
+}
+$NodeExePath = $NodeSource.Source
+
 $RequiredFiles = @(
     (Join-Path $AppReleaseDir "stacksoothe.exe"),
     (Join-Path $AppReleaseDir "flutter_windows.dll"),
@@ -27,15 +34,20 @@ $RequiredFiles = @(
     (Join-Path $ServiceDir "src\server.ts"),
     (Join-Path $ServiceDir "src\diagnosis.ts"),
     (Join-Path $ServiceDir "package.json"),
-    (Join-Path $ServiceDir "node_modules\zod")
+    (Join-Path $ServiceDir "node_modules\zod"),
+    (Join-Path $RepoRoot "dist-templates\start-stacksoothe.bat"),
+    (Join-Path $RepoRoot "dist-templates\launch.ps1"),
+    (Join-Path $RepoRoot "dist-templates\launch.bat"),
+    (Join-Path $RepoRoot "dist-templates\stop.bat"),
+    (Join-Path $RepoRoot "dist-templates\README.txt")
 )
 
 foreach ($file in $RequiredFiles) {
     if (-not (Test-Path $file)) {
-        throw "Missing required build artifact: $file. Ensure 'flutter build windows --release' and npm dependencies are satisfied."
+        throw "Missing required build artifact: $file. Ensure 'flutter build windows --release' and template files exist."
     }
 }
-Write-Host "All required build artifacts verified." -ForegroundColor Green
+Write-Host "All required build artifacts and Node runtime verified ($NodeExePath)." -ForegroundColor Green
 
 # 2. Prepare staging directory
 Write-Host "`n[2/6] Preparing clean staging directory..." -ForegroundColor Yellow
@@ -43,14 +55,18 @@ if (Test-Path $StagingDir) {
     Remove-Item -Path $StagingDir -Recurse -Force
 }
 New-Item -Path (Join-Path $StagingDir "app") -ItemType Directory -Force | Out-Null
+New-Item -Path (Join-Path $StagingDir "runtime") -ItemType Directory -Force | Out-Null
 New-Item -Path (Join-Path $StagingDir "service\src") -ItemType Directory -Force | Out-Null
 New-Item -Path (Join-Path $StagingDir "service\node_modules") -ItemType Directory -Force | Out-Null
 
 # 3. Copy files into staging
-Write-Host "`n[3/6] Staging release files..." -ForegroundColor Yellow
+Write-Host "`n[3/6] Staging release files and bundling Node runtime..." -ForegroundColor Yellow
 
 # Copy Flutter release files
 Copy-Item -Path (Join-Path $AppReleaseDir "*") -Destination (Join-Path $StagingDir "app") -Recurse -Force
+
+# Bundle standalone Node runtime
+Copy-Item -Path $NodeExePath -Destination (Join-Path $StagingDir "runtime\node.exe") -Force
 
 # Copy Service production files (zod only, zero devDependencies)
 Copy-Item -Path (Join-Path $ServiceDir "package.json") -Destination (Join-Path $StagingDir "service\package.json") -Force
@@ -61,6 +77,8 @@ Copy-Item -Path (Join-Path $ServiceDir "src\types") -Destination (Join-Path $Sta
 Copy-Item -Path (Join-Path $ServiceDir "node_modules\zod") -Destination (Join-Path $StagingDir "service\node_modules\zod") -Recurse -Force
 
 # Copy distribution launchers & docs
+Copy-Item -Path (Join-Path $RepoRoot "dist-templates\start-stacksoothe.bat") -Destination (Join-Path $StagingDir "start-stacksoothe.bat") -Force
+Copy-Item -Path (Join-Path $RepoRoot "dist-templates\launch.ps1") -Destination (Join-Path $StagingDir "launch.ps1") -Force
 Copy-Item -Path (Join-Path $RepoRoot "dist-templates\launch.bat") -Destination (Join-Path $StagingDir "launch.bat") -Force
 Copy-Item -Path (Join-Path $RepoRoot "dist-templates\stop.bat") -Destination (Join-Path $StagingDir "stop.bat") -Force
 Copy-Item -Path (Join-Path $RepoRoot "dist-templates\README.txt") -Destination (Join-Path $StagingDir "README.txt") -Force
@@ -95,6 +113,7 @@ $ZipHash = (Get-FileHash -Path $ZipPath -Algorithm SHA256).Hash.ToLower()
 $ExeHash = (Get-FileHash -Path (Join-Path $AppReleaseDir "stacksoothe.exe") -Algorithm SHA256).Hash.ToLower()
 $DllHash = (Get-FileHash -Path (Join-Path $AppReleaseDir "flutter_windows.dll") -Algorithm SHA256).Hash.ToLower()
 $AppSoHash = (Get-FileHash -Path (Join-Path $AppReleaseDir "data\app.so") -Algorithm SHA256).Hash.ToLower()
+$NodeHash = (Get-FileHash -Path (Join-Path $StagingDir "runtime\node.exe") -Algorithm SHA256).Hash.ToLower()
 
 $CommitSha = (git rev-parse HEAD).Trim()
 $BuildTimestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
@@ -105,12 +124,12 @@ $Manifest = [ordered]@{
     commit_sha = $CommitSha
     build_timestamp = $BuildTimestamp
     platform = "windows-x64"
-    architecture = "Flutter Desktop + Loopback Node/TypeScript + Local Ollama"
+    architecture = "Flutter Desktop + Loopback Node/TypeScript + Local Ollama (One-Click Launcher)"
     license = "MIT"
     prerequisites = [ordered]@{
         os = "Windows 10 or 11 (64-bit)"
-        node = ">=24.0.0"
-        ollama = ">=0.40.8"
+        node = "Bundled in package (runtime/node.exe, v24.14.0)"
+        ollama = ">=0.40.8 (http://127.0.0.1:11434)"
         model = "qwen3:1.7b (ID: 8f68893c685c, Apache-2.0)"
         ram = ">=8 GB (16 GB recommended)"
     }
@@ -120,7 +139,7 @@ $Manifest = [ordered]@{
             size_bytes = $ZipItem.Length
             size_mb = $ZipSizeMB
             sha256 = $ZipHash
-            description = "Standalone packaged Windows release candidate containing Flutter runner, runtime DLLs, compiled assets, loopback service, and launchers"
+            description = "Standalone packaged Windows release candidate with one-click launcher (start-stacksoothe.bat), bundled Node runtime, Flutter runner, runtime DLLs, compiled assets, and loopback service"
         },
         [ordered]@{
             filename = "stacksoothe.exe"
@@ -139,6 +158,12 @@ $Manifest = [ordered]@{
             size_bytes = (Get-Item (Join-Path $AppReleaseDir "data\app.so")).Length
             sha256 = $AppSoHash
             description = "AOT-compiled Flutter Dart application binary"
+        },
+        [ordered]@{
+            filename = "runtime/node.exe"
+            size_bytes = (Get-Item (Join-Path $StagingDir "runtime\node.exe")).Length
+            sha256 = $NodeHash
+            description = "Bundled Node.js v24.14.0 standalone runtime executable for zero-install execution"
         }
     )
 }

@@ -1,25 +1,25 @@
 {
     "project":  "StackSoothe",
     "release_tag":  "v0.1.0-challenge",
-    "commit_sha":  "062d10830637b234afd55a65513809c10e98f3ef",
-    "build_timestamp":  "2026-10-25T17:11:14Z",
+    "commit_sha":  "5dde722d26c3e9b0b55da176eb8a43bfdd3cde04",
+    "build_timestamp":  "2026-10-25T22:36:16Z",
     "platform":  "windows-x64",
-    "architecture":  "Flutter Desktop + Loopback Node/TypeScript + Local Ollama",
+    "architecture":  "Flutter Desktop + Loopback Node/TypeScript + Local Ollama (One-Click Launcher)",
     "license":  "MIT",
     "prerequisites":  {
                           "os":  "Windows 10 or 11 (64-bit)",
-                          "node":  "\u003e=24.0.0",
-                          "ollama":  "\u003e=0.40.8",
+                          "node":  "Bundled in package (runtime/node.exe, v24.14.0)",
+                          "ollama":  "\u003e=0.40.8 (http://127.0.0.1:11434)",
                           "model":  "qwen3:1.7b (ID: 8f68893c685c, Apache-2.0)",
                           "ram":  "\u003e=8 GB (16 GB recommended)"
                       },
     "assets":  [
                    {
                        "filename":  "stacksoothe-v0.1.0-challenge-windows-x64.zip",
-                       "size_bytes":  13936679,
-                       "size_mb":  13.29,
-                       "sha256":  "af8a45f1506fad69f499db001543a533bd6bc239237ec2ad581eab2b6989a86e",
-                       "description":  "Standalone packaged Windows release candidate containing Flutter runner, runtime DLLs, compiled assets, loopback service, and launchers"
+                       "size_bytes":  48064846,
+                       "size_mb":  45.84,
+                       "sha256":  "69228523917031727c3ec917d735bb38594c5b52cc3ba59fd31b05b2906c6a45",
+                       "description":  "Standalone packaged Windows release candidate with one-click launcher (start-stacksoothe.bat), bundled Node runtime, Flutter runner, runtime DLLs, compiled assets, and loopback service"
                    },
                    {
                        "filename":  "stacksoothe.exe",
@@ -38,6 +38,12 @@
                        "size_bytes":  5620624,
                        "sha256":  "0e2937bc15d7ea8422d6ac3708e020404a3d8f36c6570c859394ec65a32f66a2",
                        "description":  "AOT-compiled Flutter Dart application binary"
+                   },
+                   {
+                       "filename":  "runtime/node.exe",
+                       "size_bytes":  91380224,
+                       "sha256":  "63c259c81e5d472b5f11c8d506070130cb04a1ecf84b80377a34ed6ec9048088",
+                       "description":  "Bundled Node.js v24.14.0 standalone runtime executable for zero-install execution"
                    }
                ]
 }
