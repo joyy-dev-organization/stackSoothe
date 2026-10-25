@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -109,6 +111,34 @@ The widget may have been removed from the tree before the async operation comple
     _useLocalAi = loadedSettings.useLocalAi;
     _projectController.text = loadedSettings.projectContext;
     _runtimeController.text = loadedSettings.runtimeContext;
+    _serviceToken = _discoverLocalToken();
+  }
+
+  String _discoverLocalToken() {
+    try {
+      final envToken = Platform.environment['STACKSOOTHE_TOKEN'];
+      if (envToken != null && envToken.trim().isNotEmpty) {
+        return envToken.trim();
+      }
+      final candidatePaths = [
+        '../service/.stacksoothe-token',
+        'service/.stacksoothe-token',
+        '.stacksoothe-token',
+        '../../service/.stacksoothe-token',
+      ];
+      for (final relPath in candidatePaths) {
+        final f = File(relPath);
+        if (f.existsSync()) {
+          final content = f.readAsStringSync().trim();
+          if (content.isNotEmpty) {
+            return content;
+          }
+        }
+      }
+    } catch (_) {
+      // Ignore if filesystem access is restricted
+    }
+    return '';
   }
 
   @override
@@ -201,6 +231,16 @@ The widget may have been removed from the tree before the async operation comple
         });
         return;
       }
+    }
+
+    if (_useLocalAi &&
+        _serviceToken.trim().isEmpty &&
+        widget.diagnosisClient == null) {
+      setState(() {
+        _errorMessage =
+            'Bearer token required for Local AI mode. Enter token in Settings (gear icon) or switch to Demo mode.';
+      });
+      return;
     }
 
     final runId = ++_currentRunId;
@@ -1897,6 +1937,27 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
               ),
             ),
           ),
+          if (message.toLowerCase().contains('bearer token') ||
+              message.toLowerCase().contains('unauthorized')) ...[
+            const SizedBox(width: 8),
+            TextButton(
+              key: const Key('open_settings_error_button'),
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                foregroundColor: AppColors.accent,
+              ),
+              onPressed: _openSettings,
+              child: const Text(
+                'Open Settings',
+                style: TextStyle(fontSize: 12),
+              ),
+            ),
+          ],
         ],
       ),
     );
