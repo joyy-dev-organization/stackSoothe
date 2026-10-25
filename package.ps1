@@ -39,7 +39,8 @@ $RequiredFiles = @(
     (Join-Path $RepoRoot "dist-templates\launch.ps1"),
     (Join-Path $RepoRoot "dist-templates\launch.bat"),
     (Join-Path $RepoRoot "dist-templates\stop.bat"),
-    (Join-Path $RepoRoot "dist-templates\README.txt")
+    (Join-Path $RepoRoot "dist-templates\README.txt"),
+    (Join-Path $RepoRoot "dist-templates\QUICKSTART.md")
 )
 
 foreach ($file in $RequiredFiles) {
@@ -82,6 +83,7 @@ Copy-Item -Path (Join-Path $RepoRoot "dist-templates\launch.ps1") -Destination (
 Copy-Item -Path (Join-Path $RepoRoot "dist-templates\launch.bat") -Destination (Join-Path $StagingDir "launch.bat") -Force
 Copy-Item -Path (Join-Path $RepoRoot "dist-templates\stop.bat") -Destination (Join-Path $StagingDir "stop.bat") -Force
 Copy-Item -Path (Join-Path $RepoRoot "dist-templates\README.txt") -Destination (Join-Path $StagingDir "README.txt") -Force
+Copy-Item -Path (Join-Path $RepoRoot "dist-templates\QUICKSTART.md") -Destination (Join-Path $StagingDir "QUICKSTART.md") -Force
 
 # 4. Enforce strict privacy and credential exclusion scan
 Write-Host "`n[4/6] Auditing staged files for secrets and forbidden artifacts..." -ForegroundColor Yellow
@@ -115,6 +117,13 @@ $DllHash = (Get-FileHash -Path (Join-Path $AppReleaseDir "flutter_windows.dll") 
 $AppSoHash = (Get-FileHash -Path (Join-Path $AppReleaseDir "data\app.so") -Algorithm SHA256).Hash.ToLower()
 $NodeHash = (Get-FileHash -Path (Join-Path $StagingDir "runtime\node.exe") -Algorithm SHA256).Hash.ToLower()
 
+# Write standalone .sha256 file
+$Sha256Path = "$ZipPath.sha256"
+$Sha256Content = "$ZipHash *$([System.IO.Path]::GetFileName($ZipPath))`r`n"
+[System.IO.File]::WriteAllText($Sha256Path, $Sha256Content, [System.Text.Encoding]::ASCII)
+$Sha256Item = Get-Item $Sha256Path
+Write-Host "SHA-256 file generated: $Sha256Path ($($Sha256Item.Length) bytes)" -ForegroundColor Green
+
 $CommitSha = (git rev-parse HEAD).Trim()
 $BuildTimestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 
@@ -140,6 +149,12 @@ $Manifest = [ordered]@{
             size_mb = $ZipSizeMB
             sha256 = $ZipHash
             description = "Standalone packaged Windows release candidate with one-click launcher (start-stacksoothe.bat), bundled Node runtime, Flutter runner, runtime DLLs, compiled assets, and loopback service"
+        },
+        [ordered]@{
+            filename = [System.IO.Path]::GetFileName($Sha256Path)
+            size_bytes = $Sha256Item.Length
+            sha256 = (Get-FileHash -Path $Sha256Path -Algorithm SHA256).Hash.ToLower()
+            description = "Cryptographic SHA-256 checksum file for verifying archive integrity"
         },
         [ordered]@{
             filename = "stacksoothe.exe"
@@ -176,4 +191,5 @@ Write-Host "`n==========================================================" -Foreg
 Write-Host "  Release Packaging Complete!" -ForegroundColor Cyan
 Write-Host "  Archive: $ZipPath" -ForegroundColor Cyan
 Write-Host "  Archive SHA-256: $ZipHash" -ForegroundColor Cyan
+Write-Host "  SHA-256 File: $Sha256Path" -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan

@@ -1,8 +1,8 @@
 {
     "project":  "StackSoothe",
     "release_tag":  "v0.1.0-challenge",
-    "commit_sha":  "5dde722d26c3e9b0b55da176eb8a43bfdd3cde04",
-    "build_timestamp":  "2026-10-25T22:36:16Z",
+    "commit_sha":  "86d95539b95480bf969bd0e5220242bf0302df1d",
+    "build_timestamp":  "2026-10-25T23:12:02Z",
     "platform":  "windows-x64",
     "architecture":  "Flutter Desktop + Loopback Node/TypeScript + Local Ollama (One-Click Launcher)",
     "license":  "MIT",
@@ -16,10 +16,16 @@
     "assets":  [
                    {
                        "filename":  "stacksoothe-v0.1.0-challenge-windows-x64.zip",
-                       "size_bytes":  48064846,
+                       "size_bytes":  48066616,
                        "size_mb":  45.84,
-                       "sha256":  "69228523917031727c3ec917d735bb38594c5b52cc3ba59fd31b05b2906c6a45",
+                       "sha256":  "e6e483726cf5ab64885b143afcd11bde3f0c360ffa76d7960c7965d79209c5e6",
                        "description":  "Standalone packaged Windows release candidate with one-click launcher (start-stacksoothe.bat), bundled Node runtime, Flutter runner, runtime DLLs, compiled assets, and loopback service"
+                   },
+                   {
+                       "filename":  "stacksoothe-v0.1.0-challenge-windows-x64.zip.sha256",
+                       "size_bytes":  112,
+                       "sha256":  "3b74ed2c4745bc31c756b5a9102782136d97d42eaefa9ddfa3cef5909ac06efd",
+                       "description":  "Cryptographic SHA-256 checksum file for verifying archive integrity"
                    },
                    {
                        "filename":  "stacksoothe.exe",

@@ -62,13 +62,15 @@ A pre-packaged, standalone Windows x64 release candidate is available with a **o
 
 - **Release Tag**: [`v0.1.0-challenge`](https://github.com/joyy-dev-organization/stackSoothe/releases/tag/v0.1.0-challenge)
 - **Archive File**: `stacksoothe-v0.1.0-challenge-windows-x64.zip` (45.84 MB)
-- **Archive SHA-256**: `69228523917031727c3ec917d735bb38594c5b52cc3ba59fd31b05b2906c6a45`
+- **Archive SHA-256**: `e6e483726cf5ab64885b143afcd11bde3f0c360ffa76d7960c7965d79209c5e6`
+- **Checksum Asset**: `stacksoothe-v0.1.0-challenge-windows-x64.zip.sha256` (112 B)
 
 ### Asset Checksum Manifest (`release-manifest.json`)
 
 | Component | File Path | Size | SHA-256 Checksum |
 |---|---|---|---|
-| Complete Archive | `stacksoothe-v0.1.0-challenge-windows-x64.zip` | 45.84 MB | `69228523917031727c3ec917d735bb38594c5b52cc3ba59fd31b05b2906c6a45` |
+| Complete Archive | `stacksoothe-v0.1.0-challenge-windows-x64.zip` | 45.84 MB | `e6e483726cf5ab64885b143afcd11bde3f0c360ffa76d7960c7965d79209c5e6` |
+| Checksum File | `stacksoothe-v0.1.0-challenge-windows-x64.zip.sha256` | 112 B | `3b74ed2c4745bc31c756b5a9102782136d97d42eaefa9ddfa3cef5909ac06efd` |
 | Native Runner | `app/stacksoothe.exe` | 89.6 KB | `3ab9e272f5d0200cc675f1e33da4ab72e8241e943fee55b8471b3c8541db50e2` |
 | Flutter Engine | `app/flutter_windows.dll` | 21.28 MB | `a147927018fcc1a843fb3938ead58838d2e185ce7d840bc4191a7a1b90c21015` |
 | Dart AOT Code | `app/data/app.so` | 5.62 MB | `0e2937bc15d7ea8422d6ac3708e020404a3d8f36c6570c859394ec65a32f66a2` |
@@ -86,14 +88,15 @@ A pre-packaged, standalone Windows x64 release candidate is available with a **o
    ```powershell
    ollama run qwen3:1.7b
    ```
-2. Download and extract `stacksoothe-v0.1.0-challenge-windows-x64.zip`.
-3. Double-click **`start-stacksoothe.bat`**. The launcher automatically:
+2. Download `stacksoothe-v0.1.0-challenge-windows-x64.zip` and verify its SHA-256 checksum.
+3. Extract the archive and double-click **`start-stacksoothe.bat`**. The launcher automatically:
    - Verifies prerequisites.
    - Spawns the local Node diagnosis service in the background on loopback `127.0.0.1:11435`.
    - Polls verified `/health` readiness.
    - Launches the Flutter desktop interface.
    - When you close the app window, the owned background service terminates automatically.
-4. (Optional) Run **`stop.bat`** to manually terminate any background processes if needed.
+4. Review **`QUICKSTART.md`** inside the package for full instructions, Windows SmartScreen guidance, and local privacy guarantees.
+5. (Optional) Run **`stop.bat`** to manually terminate any background processes if needed.
 
 ---
 
