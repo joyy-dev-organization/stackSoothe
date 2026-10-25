@@ -17,6 +17,18 @@ class AppSettings {
     this.runtimeContext = 'Flutter 3.x / Dart 3.x (Windows)',
   });
 
+  /// Validates that a URL points strictly to loopback (127.0.0.1, localhost, or ::1).
+  static bool isLoopbackUrl(String url) {
+    try {
+      final uri = Uri.parse(url.trim());
+      if (uri.scheme != 'http' && uri.scheme != 'https') return false;
+      final host = uri.host.toLowerCase().trim();
+      return host == '127.0.0.1' || host == 'localhost' || host == '::1';
+    } catch (_) {
+      return false;
+    }
+  }
+
   AppSettings copyWith({
     String? serviceUrl,
     String? model,
@@ -24,8 +36,9 @@ class AppSettings {
     String? projectContext,
     String? runtimeContext,
   }) {
+    final effectiveUrl = serviceUrl ?? this.serviceUrl;
     return AppSettings(
-      serviceUrl: serviceUrl ?? this.serviceUrl,
+      serviceUrl: isLoopbackUrl(effectiveUrl) ? effectiveUrl : this.serviceUrl,
       model: model ?? this.model,
       useLocalAi: useLocalAi ?? this.useLocalAi,
       projectContext: projectContext ?? this.projectContext,
@@ -35,7 +48,9 @@ class AppSettings {
 
   Map<String, dynamic> toJson() {
     return <String, dynamic>{
-      'service_url': serviceUrl.trim(),
+      'service_url': isLoopbackUrl(serviceUrl)
+          ? serviceUrl.trim()
+          : 'http://127.0.0.1:11435',
       'model': model.trim(),
       'use_local_ai': useLocalAi,
       'project_context': projectContext.trim(),
@@ -51,12 +66,17 @@ class AppSettings {
       return fallback;
     }
 
+    final rawUrl = nonEmptyOr(json['service_url'], 'http://127.0.0.1:11435');
+    final safeUrl = isLoopbackUrl(rawUrl) ? rawUrl : 'http://127.0.0.1:11435';
+
     return AppSettings(
-      serviceUrl: nonEmptyOr(json['service_url'], 'http://127.0.0.1:11435'),
+      serviceUrl: safeUrl,
       model: nonEmptyOr(json['model'], 'qwen2.5-coder:3b'),
       useLocalAi: json['use_local_ai'] == true,
-      projectContext:
-          nonEmptyOr(json['project_context'], 'default-flutter-app'),
+      projectContext: nonEmptyOr(
+        json['project_context'],
+        'default-flutter-app',
+      ),
       runtimeContext: nonEmptyOr(
         json['runtime_context'],
         'Flutter 3.x / Dart 3.x (Windows)',

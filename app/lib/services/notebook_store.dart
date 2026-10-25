@@ -33,8 +33,7 @@ class NotebookStore {
   int _idCounter = 0;
 
   NotebookStore({Directory? storageDirectory})
-      : storageDirectory =
-            storageDirectory ?? resolveDefaultStorageDirectory();
+    : storageDirectory = storageDirectory ?? resolveDefaultStorageDirectory();
 
   /// Resolves a local app data directory outside the git repo and outside
   /// OneDrive/Documents cloud-synced folders on Windows (`%LOCALAPPDATA%\StackSoothe`).
@@ -46,9 +45,7 @@ class NotebookStore {
     final home =
         Platform.environment['USERPROFILE'] ?? Platform.environment['HOME'];
     if (home != null && home.trim().isNotEmpty) {
-      return Directory(
-        '$home${Platform.pathSeparator}.stacksoothe_local',
-      );
+      return Directory('$home${Platform.pathSeparator}.stacksoothe_local');
     }
     return Directory(
       '${Directory.systemTemp.path}${Platform.pathSeparator}StackSoothe',
@@ -82,7 +79,9 @@ class NotebookStore {
     try {
       final stat = file.statSync();
       if (stat.size > maxFileBytes) {
-        throw const FormatException('Notebook store exceeded 2 MB safety limit');
+        throw const FormatException(
+          'Notebook store exceeded 2 MB safety limit',
+        );
       }
       final rawBytes = file.readAsBytesSync();
       final rawText = utf8.decode(rawBytes);
@@ -99,13 +98,17 @@ class NotebookStore {
 
       final rawList = decoded['entries'];
       if (rawList is! List) {
-        throw const FormatException('Notebook entries field must be a JSON list');
+        throw const FormatException(
+          'Notebook entries field must be a JSON list',
+        );
       }
 
       final parsedEntries = <NotebookEntry>[];
       for (final item in rawList) {
         if (item is! Map<String, dynamic>) {
-          throw const FormatException('Notebook entry item must be a JSON object');
+          throw const FormatException(
+            'Notebook entry item must be a JSON object',
+          );
         }
         // Fail-closed / strip any accidental token fields
         if (item.containsKey('serviceToken') ||

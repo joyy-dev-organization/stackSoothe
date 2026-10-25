@@ -34,6 +34,22 @@ export interface DiagnosisOptions {
   baseUrl?: string;
   timeoutMs?: number;
   spanSink?: SpanSink;
+  signal?: AbortSignal;
+}
+
+export function isLoopbackHost(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const hostname = parsed.hostname.toLowerCase().trim();
+    return (
+      hostname === '127.0.0.1' ||
+      hostname === 'localhost' ||
+      hostname === '::1' ||
+      hostname === '[::1]'
+    );
+  } catch {
+    return false;
+  }
 }
 
 export const PROMPT_VERSION = 'v1.0.0';
@@ -134,11 +150,33 @@ export async function runDiagnosis(options: DiagnosisOptions): Promise<Diagnosis
   const timeoutMs = options.timeoutMs ?? 120_000;
   const startTime = Date.now();
 
+  // Enforce loopback Ollama endpoint
+  if (!isLoopbackHost(baseUrl)) {
+    return {
+      success: false,
+      error: {
+        code: 'NON_LOOPBACK_URL_REJECTED',
+        message: `Private mode requires a loopback Ollama endpoint (127.0.0.1 or localhost). Non-loopback URL '${baseUrl}' rejected.`,
+      },
+      meta: {
+        model,
+        prompt_version: PROMPT_VERSION,
+        raw_valid: false,
+        repaired: false,
+        duration_ms: 0,
+      },
+    };
+  }
+
   options.spanSink?.onStart?.({ model, provider: 'ollama' });
 
   // 1. Initial call to Ollama
   let chatResponse: OllamaChatResponse;
   try {
+    const initialSignals: AbortSignal[] = [AbortSignal.timeout(timeoutMs)];
+    if (options.signal) initialSignals.push(options.signal);
+    const initialSignal = AbortSignal.any(initialSignals);
+
     const res = await fetch(`${baseUrl}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -152,7 +190,7 @@ export async function runDiagnosis(options: DiagnosisOptions): Promise<Diagnosis
           { role: 'user', content: buildUserPrompt(options.errorLog, options.sourceCode) },
         ],
       }),
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: initialSignal,
     });
 
     if (!res.ok) {
@@ -178,6 +216,25 @@ export async function runDiagnosis(options: DiagnosisOptions): Promise<Diagnosis
     chatResponse = (await res.json()) as OllamaChatResponse;
   } catch (err: unknown) {
     const durationMs = Date.now() - startTime;
+
+    if (options.signal?.aborted) {
+      options.spanSink?.onError?.({ model, errorType: 'ABORTED', durationMs });
+      return {
+        success: false,
+        error: {
+          code: 'DIAGNOSIS_ABORTED',
+          message: 'Diagnosis request was cancelled or aborted.',
+        },
+        meta: {
+          model,
+          prompt_version: PROMPT_VERSION,
+          raw_valid: false,
+          repaired: false,
+          duration_ms: durationMs,
+        },
+      };
+    }
+
     const isTimeout =
       (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) ||
       (err instanceof Error && err.message.toLowerCase().includes('timeout'));
@@ -258,29 +315,38 @@ export async function runDiagnosis(options: DiagnosisOptions): Promise<Diagnosis
     };
   }
 
-  // 3. Attempt single repair (capped to 1 attempt)
-  const errorIssues = rawValidation.error.issues
-    .map((i) => `- ${i.path.join('.')}: ${i.message}`)
-    .join('\n');
+  // 3. Attempt single repair (capped to 1 attempt, bounded by remaining deadline)
+  const elapsedMs = Date.now() - startTime;
+  const remainingMs = timeoutMs - elapsedMs;
 
-  try {
-    const repairRes = await fetch(`${baseUrl}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        stream: false,
-        format: 'json',
-        options: { temperature: 0.1 },
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: buildUserPrompt(options.errorLog, options.sourceCode) },
-          { role: 'assistant', content: rawContent },
-          { role: 'user', content: buildRepairPrompt(rawContent, errorIssues) },
-        ],
-      }),
-      signal: AbortSignal.timeout(Math.min(timeoutMs, 60_000)),
-    });
+  if (remainingMs > 2000 && !options.signal?.aborted) {
+    const repairTimeoutMs = Math.min(60_000, remainingMs);
+    const repairSignals: AbortSignal[] = [AbortSignal.timeout(repairTimeoutMs)];
+    if (options.signal) repairSignals.push(options.signal);
+    const repairSignal = AbortSignal.any(repairSignals);
+
+    const errorIssues = rawValidation.error.issues
+      .map((i) => `- ${i.path.join('.')}: ${i.message}`)
+      .join('\n');
+
+    try {
+      const repairRes = await fetch(`${baseUrl}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          stream: false,
+          format: 'json',
+          options: { temperature: 0.1 },
+          messages: [
+            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'user', content: buildUserPrompt(options.errorLog, options.sourceCode) },
+            { role: 'assistant', content: rawContent },
+            { role: 'user', content: buildRepairPrompt(rawContent, errorIssues) },
+          ],
+        }),
+        signal: repairSignal,
+      });
 
     if (repairRes.ok) {
       const repairData = (await repairRes.json()) as OllamaChatResponse;
@@ -327,6 +393,7 @@ export async function runDiagnosis(options: DiagnosisOptions): Promise<Diagnosis
   } catch {
     // Repair call failed; fall through to schema error
   }
+}
 
   // 4. If repair failed or was unparseable: fail-closed with explicit error
   const durationMs = Date.now() - startTime;

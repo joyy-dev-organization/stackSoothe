@@ -13,8 +13,8 @@ class SettingsStore {
   AppSettings _settings = const AppSettings();
 
   SettingsStore({Directory? storageDirectory})
-      : storageDirectory =
-            storageDirectory ?? NotebookStore.resolveDefaultStorageDirectory();
+    : storageDirectory =
+          storageDirectory ?? NotebookStore.resolveDefaultStorageDirectory();
 
   File get settingsFile =>
       File('${storageDirectory.path}${Platform.pathSeparator}$fileName');
@@ -32,7 +32,8 @@ class SettingsStore {
       final raw = file.readAsStringSync();
       final decoded = jsonDecode(raw);
       if (decoded is Map<String, dynamic>) {
-        final hadForbiddenToken = decoded.containsKey('service_token') ||
+        final hadForbiddenToken =
+            decoded.containsKey('service_token') ||
             decoded.containsKey('serviceToken') ||
             decoded.containsKey('token');
         _settings = AppSettings.fromJson(decoded);
@@ -55,8 +56,9 @@ class SettingsStore {
       storageDirectory.createSync(recursive: true);
     }
 
-    final encoded =
-        const JsonEncoder.withIndent('  ').convert(updated.toJson());
+    final encoded = const JsonEncoder.withIndent(
+      '  ',
+    ).convert(updated.toJson());
     final target = settingsFile;
     final tmp = File(
       '${target.path}.tmp.${DateTime.now().toUtc().microsecondsSinceEpoch}',

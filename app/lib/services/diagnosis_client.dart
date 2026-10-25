@@ -1,13 +1,25 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../models/app_settings.dart';
 import '../models/diagnosis_result.dart';
 
-typedef DiagnosisHandler = Future<DiagnosisResult> Function({
-  required String errorLog,
-  required String sourceCode,
-  required String model,
-});
+class ServiceBusyException implements Exception {
+  final String message;
+  const ServiceBusyException([
+    this.message =
+        'Another diagnosis is currently in progress. StackSoothe operates single-concurrency without queuing.',
+  ]);
+  @override
+  String toString() => message;
+}
+
+typedef DiagnosisHandler =
+    Future<DiagnosisResult> Function({
+      required String errorLog,
+      required String sourceCode,
+      required String model,
+    });
 
 class DiagnosisClient {
   DiagnosisClient({
@@ -23,12 +35,19 @@ class DiagnosisClient {
   final DiagnosisHandler? customHandler;
 
   int _invocationCount = 0;
+  HttpClient? _activeClient;
 
   /// Number of times [diagnose] was invoked on this client instance.
   int get invocationCount => _invocationCount;
 
   void resetInvocationCount() {
     _invocationCount = 0;
+  }
+
+  /// Cancels in-flight network requests immediately.
+  void cancelPendingRequest() {
+    _activeClient?.close(force: true);
+    _activeClient = null;
   }
 
   String get _rootUrl => baseUrl.trim().replaceFirst(RegExp(r'/+$'), '');
@@ -47,8 +66,15 @@ class DiagnosisClient {
       );
     }
 
+    if (!AppSettings.isLoopbackUrl(_rootUrl)) {
+      throw ArgumentError(
+        'Private mode requires a loopback address (127.0.0.1 or localhost). Non-loopback URL "$_rootUrl" rejected.',
+      );
+    }
+
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 10);
+    _activeClient = client;
 
     try {
       final request = await client
@@ -60,26 +86,35 @@ class DiagnosisClient {
         request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
       }
 
-      request.add(utf8.encode(jsonEncode({
-        'errorLog': errorLog,
-        'sourceCode': sourceCode,
-        'model': model,
-      })));
+      request.add(
+        utf8.encode(
+          jsonEncode({
+            'errorLog': errorLog,
+            'sourceCode': sourceCode,
+            'model': model,
+          }),
+        ),
+      );
 
-      final response = await request
-          .close()
-          .timeout(const Duration(seconds: 130));
+      final response = await request.close().timeout(
+        const Duration(seconds: 135),
+      );
 
       final responseText = await response
           .transform(utf8.decoder)
           .join()
-          .timeout(const Duration(seconds: 130));
+          .timeout(const Duration(seconds: 135));
+
+      if (response.statusCode == 429) {
+        throw const ServiceBusyException();
+      }
 
       if (response.statusCode < 200 || response.statusCode >= 300) {
         try {
           final errJson = jsonDecode(responseText);
           if (errJson is Map) {
-            if (errJson['error'] is Map && errJson['error']['message'] != null) {
+            if (errJson['error'] is Map &&
+                errJson['error']['message'] != null) {
               throw Exception(errJson['error']['message'].toString());
             }
             if (errJson['message'] != null) {
@@ -99,20 +134,24 @@ class DiagnosisClient {
         'Could not connect to StackSoothe service at $_rootUrl (${err.message}). Make sure the local service is running.',
       );
     } finally {
+      if (_activeClient == client) {
+        _activeClient = null;
+      }
       client.close(force: true);
     }
   }
 
   Future<String> testConnection() async {
-    final client = HttpClient()
-      ..connectionTimeout = const Duration(seconds: 5);
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
 
     try {
       final request = await client
           .getUrl(Uri.parse('$_rootUrl/health'))
           .timeout(const Duration(seconds: 5));
 
-      final response = await request.close().timeout(const Duration(seconds: 5));
+      final response = await request.close().timeout(
+        const Duration(seconds: 5),
+      );
       final body = await response.transform(utf8.decoder).join();
 
       if (response.statusCode == 200) {

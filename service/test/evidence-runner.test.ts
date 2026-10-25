@@ -81,7 +81,7 @@ test('M3 Tracing, Diagnostic Paths & Strict Privacy Verification', async (t) => 
           return { status: 'success' };
         },
         flush: async () => true,
-      }),
+      } as any),
     });
 
     const fixturesPath = path.resolve(__dirname, '../fixtures/synthetic-cases.json');

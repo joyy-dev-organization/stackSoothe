@@ -83,10 +83,12 @@ class NotebookEntry {
       modelName: modelName,
       promptVersion: promptVersion,
       verificationStatus: status,
-      verifiedAtIso:
-          status == VerificationStatus.verified ? updatedAtIso : null,
-      verificationNote:
-          (cleanNote != null && cleanNote.isNotEmpty) ? cleanNote : null,
+      verifiedAtIso: status == VerificationStatus.verified
+          ? updatedAtIso
+          : null,
+      verificationNote: (cleanNote != null && cleanNote.isNotEmpty)
+          ? cleanNote
+          : null,
       diagnosis: diagnosis,
     );
   }
@@ -125,7 +127,9 @@ class NotebookEntry {
     final id = requireStr('id');
     final diagMap = json['diagnosis'];
     if (diagMap is! Map<String, dynamic>) {
-      throw const FormatException('Missing or invalid NotebookEntry diagnosis object');
+      throw const FormatException(
+        'Missing or invalid NotebookEntry diagnosis object',
+      );
     }
 
     final diagnosis = DiagnosisResult.fromNotebookJson(
@@ -148,8 +152,9 @@ class NotebookEntry {
       runtimeContext: requireStr('runtime_context'),
       modelName: requireStr('model_name'),
       promptVersion: requireStr('prompt_version'),
-      verificationStatus:
-          VerificationStatus.fromJsonValue(json['verification_status']),
+      verificationStatus: VerificationStatus.fromJsonValue(
+        json['verification_status'],
+      ),
       verifiedAtIso: json['verified_at_iso'] as String?,
       verificationNote: json['verification_note'] as String?,
       diagnosis: diagnosis,
@@ -157,11 +162,7 @@ class NotebookEntry {
   }
 }
 
-enum NotebookMatchKind {
-  none,
-  exact,
-  similarContextChanged,
-}
+enum NotebookMatchKind { none, exact, similarContextChanged }
 
 class NotebookLookupResult {
   final NotebookMatchKind kind;
@@ -178,23 +179,19 @@ class NotebookLookupResult {
     this.runtimeChanged = false,
   });
 
-  const NotebookLookupResult.none()
-      : this._(kind: NotebookMatchKind.none);
+  const NotebookLookupResult.none() : this._(kind: NotebookMatchKind.none);
 
   const NotebookLookupResult.exact(NotebookEntry entry)
-      : this._(
-          kind: NotebookMatchKind.exact,
-          exactEntry: entry,
-        );
+    : this._(kind: NotebookMatchKind.exact, exactEntry: entry);
 
   const NotebookLookupResult.similar({
     required List<NotebookEntry> entries,
     required bool sourceChanged,
     required bool runtimeChanged,
   }) : this._(
-          kind: NotebookMatchKind.similarContextChanged,
-          similarEntries: entries,
-          sourceChanged: sourceChanged,
-          runtimeChanged: runtimeChanged,
-        );
+         kind: NotebookMatchKind.similarContextChanged,
+         similarEntries: entries,
+         sourceChanged: sourceChanged,
+         runtimeChanged: runtimeChanged,
+       );
 }

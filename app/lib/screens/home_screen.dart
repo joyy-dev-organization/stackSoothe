@@ -10,6 +10,28 @@ import '../services/notebook_store.dart';
 import '../services/settings_store.dart';
 import '../theme/app_theme.dart';
 
+class DiagnosisRequestSnapshot {
+  final int runId;
+  final String errorLog;
+  final String sourceCode;
+  final String projectContext;
+  final String runtimeContext;
+  final String model;
+  final bool useLocalAi;
+  final String activeNav;
+
+  const DiagnosisRequestSnapshot({
+    required this.runId,
+    required this.errorLog,
+    required this.sourceCode,
+    required this.projectContext,
+    required this.runtimeContext,
+    required this.model,
+    required this.useLocalAi,
+    required this.activeNav,
+  });
+}
+
 class HomeScreen extends StatefulWidget {
   const HomeScreen({
     super.key,
@@ -27,8 +49,16 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  int _currentRunId = 0;
+  int _activeRunId = 0;
+  DiagnosisRequestSnapshot? _inFlightSnapshot;
+  DiagnosisClient? _inFlightClient;
+  String? _detachedSnapshotNotification;
+  bool _isBusyServiceState = false;
+
   final TextEditingController _errorController = TextEditingController(
-    text: '''lib/screens/profile_screen.dart:42:20: Error: Don't use 'BuildContext's across async gaps.
+    text:
+        '''lib/screens/profile_screen.dart:42:20: Error: Don't use 'BuildContext's across async gaps.
     Navigator.of(context).pop();
                    ^^^^^^^
 
@@ -107,9 +137,26 @@ The widget may have been removed from the tree before the async operation comple
     );
   }
 
+  void _stopWaiting() {
+    _inFlightClient?.cancelPendingRequest();
+    setState(() {
+      _activeRunId++;
+      _isDiagnosing = false;
+      _inFlightSnapshot = null;
+      _inFlightClient = null;
+      _detachedSnapshotNotification =
+          'Stopped waiting for diagnosis run #$_currentRunId. Local model work may still continue in background.';
+    });
+  }
+
   Future<void> _runDiagnosis({bool forceFresh = false}) async {
+    if (_isDiagnosing) {
+      return;
+    }
     if (_errorController.text.trim().isEmpty) {
-      setState(() => _errorMessage = 'Paste an error log before running a diagnosis.');
+      setState(
+        () => _errorMessage = 'Paste an error log before running a diagnosis.',
+      );
       return;
     }
 
@@ -129,6 +176,8 @@ The widget may have been removed from the tree before the async operation comple
           _errorMessage = null;
           _pendingSimilarLookup = null;
           _isViewingStaleSimilar = false;
+          _detachedSnapshotNotification = null;
+          _isBusyServiceState = false;
           _activeNotebookEntry = exact;
           _verificationNoteController.text = exact.verificationNote ?? '';
           _result = exact.diagnosis.copyWith(
@@ -146,54 +195,111 @@ The widget may have been removed from the tree before the async operation comple
           _result = null;
           _activeNotebookEntry = null;
           _isViewingStaleSimilar = false;
+          _detachedSnapshotNotification = null;
+          _isBusyServiceState = false;
           _pendingSimilarLookup = lookup;
         });
         return;
       }
     }
 
+    final runId = ++_currentRunId;
+    _activeRunId = runId;
+    final snapshot = DiagnosisRequestSnapshot(
+      runId: runId,
+      errorLog: _errorController.text,
+      sourceCode: _codeController.text,
+      projectContext: _projectController.text,
+      runtimeContext: _runtimeController.text,
+      model: _model,
+      useLocalAi: _useLocalAi,
+      activeNav: _activeNav,
+    );
+
+    final client =
+        widget.diagnosisClient ??
+        DiagnosisClient(
+          baseUrl: _serviceUrl,
+          token: _serviceToken,
+          model: _model,
+        );
+    _inFlightClient = client;
+
     setState(() {
       _isDiagnosing = true;
       _errorMessage = null;
       _pendingSimilarLookup = null;
       _isViewingStaleSimilar = false;
+      _detachedSnapshotNotification = null;
+      _isBusyServiceState = false;
+      _inFlightSnapshot = snapshot;
     });
 
     try {
       _modelInvocationCount++;
       final DiagnosisResult result;
       if (_useLocalAi || widget.diagnosisClient != null) {
-        final client = widget.diagnosisClient ??
-            DiagnosisClient(
-              baseUrl: _serviceUrl,
-              token: _serviceToken,
-              model: _model,
-            );
         result = await client.diagnose(
-          errorLog: _errorController.text,
-          sourceCode: _codeController.text,
+          errorLog: snapshot.errorLog,
+          sourceCode: snapshot.sourceCode,
         );
       } else {
         result = await DemoDiagnosisService().diagnose(
-          errorLog: _errorController.text,
-          sourceCode: _codeController.text,
+          errorLog: snapshot.errorLog,
+          sourceCode: snapshot.sourceCode,
         );
       }
 
       if (!mounted) return;
+
+      // 1. Check if run is stale (user cancelled or superseded)
+      if (runId != _activeRunId) {
+        return;
+      }
+
+      // 2. Check if editor input text was cleared or edited while diagnosis was in-flight
+      final inputChanged =
+          _errorController.text != snapshot.errorLog ||
+          _codeController.text != snapshot.sourceCode;
+
       setState(() {
         _activeNotebookEntry = null;
         _isViewingStaleSimilar = false;
-        _result = result.copyWith(isRecalled: false, recalledEntryId: null);
+        _isBusyServiceState = false;
+        _result = result.copyWith(
+          isRecalled: false,
+          recalledEntryId: null,
+          modelName: result.isDemo ? result.modelName : snapshot.model,
+        );
+
+        if (inputChanged) {
+          _detachedSnapshotNotification =
+              'Diagnosis completed for snapshot (run #$runId). Current editor text was modified and preserved.';
+        } else {
+          _detachedSnapshotNotification = null;
+        }
+      });
+    } on ServiceBusyException {
+      if (!mounted || runId != _activeRunId) return;
+      setState(() {
+        _isBusyServiceState = true;
+        _errorMessage =
+            'Local service is currently busy completing a previous model request. Please wait a moment before retrying.';
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || runId != _activeRunId) return;
       setState(() {
         _errorMessage = _cleanException(error);
         _result = null;
       });
     } finally {
-      if (mounted) setState(() => _isDiagnosing = false);
+      if (mounted && runId == _activeRunId) {
+        setState(() {
+          _isDiagnosing = false;
+          _inFlightSnapshot = null;
+          _inFlightClient = null;
+        });
+      }
     }
   }
 
@@ -283,7 +389,8 @@ The widget may have been removed from the tree before the async operation comple
   void _loadExample(String key) {
     final examples = <String, ({String log, String code})>{
       'context': (
-        log: '''lib/screens/profile_screen.dart:42:20: Error: Don't use 'BuildContext's across async gaps.
+        log:
+            '''lib/screens/profile_screen.dart:42:20: Error: Don't use 'BuildContext's across async gaps.
     Navigator.of(context).pop();
                    ^^^^^^^
 
@@ -315,7 +422,8 @@ The relevant error-causing widget was:
 )''',
       ),
       'firebase': (
-        log: '''FirebaseException ([core/not-initialized] Firebase has not been correctly initialized. Ensure Firebase.initializeApp is completed.)
+        log:
+            '''FirebaseException ([core/not-initialized] Firebase has not been correctly initialized. Ensure Firebase.initializeApp is completed.)
 PlatformException: CONFIGURATION_NOT_FOUND''',
         code: '''void main() {
   runApp(const MyApp());
@@ -336,7 +444,12 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
   }
 
   void _clearInputs() {
+    _inFlightClient?.cancelPendingRequest();
     setState(() {
+      _activeRunId++; // invalidate any in-flight response so it won't overwrite cleared inputs
+      _isDiagnosing = false;
+      _inFlightSnapshot = null;
+      _inFlightClient = null;
       _errorController.clear();
       _codeController.clear();
       _result = null;
@@ -344,6 +457,8 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
       _pendingSimilarLookup = null;
       _isViewingStaleSimilar = false;
       _errorMessage = null;
+      _detachedSnapshotNotification = null;
+      _isBusyServiceState = false;
     });
   }
 
@@ -399,14 +514,18 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
                     ),
                   ),
                   const SizedBox(height: 16),
-                  const Text('BEARER TOKEN (SESSION MEMORY ONLY)', style: _eyebrowStyle),
+                  const Text(
+                    'BEARER TOKEN (SESSION MEMORY ONLY)',
+                    style: _eyebrowStyle,
+                  ),
                   const SizedBox(height: 8),
                   TextField(
                     key: const Key('settings_token_field'),
                     controller: tokenController,
                     obscureText: true,
                     decoration: const InputDecoration(
-                      hintText: 'Configured in .stacksoothe-token (never saved to notebook)',
+                      hintText:
+                          'Configured in .stacksoothe-token (never saved to notebook)',
                       prefixIcon: Icon(Icons.key_rounded),
                     ),
                   ),
@@ -450,8 +569,19 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
                           : () async {
                               if (serviceUrlController.text.trim().isEmpty ||
                                   modelController.text.trim().isEmpty) {
-                                setDialogState(() => connectionMessage =
-                                    'Enter both a service URL and a model tag first.');
+                                setDialogState(
+                                  () => connectionMessage =
+                                      'Enter both a service URL and a model tag first.',
+                                );
+                                return;
+                              }
+                              final enteredUrl = serviceUrlController.text
+                                  .trim();
+                              if (!AppSettings.isLoopbackUrl(enteredUrl)) {
+                                setDialogState(
+                                  () => connectionMessage =
+                                      'Private mode requires a loopback address (127.0.0.1 or localhost). Non-loopback URL rejected.',
+                                );
                                 return;
                               }
                               setDialogState(() {
@@ -465,11 +595,16 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
                                   model: modelController.text.trim(),
                                 ).testConnection();
                                 if (!dialogContext.mounted) return;
-                                setDialogState(() => connectionMessage = status);
+                                setDialogState(
+                                  () => connectionMessage = status,
+                                );
                               } catch (error) {
                                 if (!dialogContext.mounted) return;
-                                setDialogState(() => connectionMessage =
-                                    _cleanException(error));
+                                setDialogState(
+                                  () => connectionMessage = _cleanException(
+                                    error,
+                                  ),
+                                );
                               } finally {
                                 if (dialogContext.mounted) {
                                   setDialogState(() => testing = false);
@@ -483,7 +618,9 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
                           : const Icon(Icons.cable_rounded, size: 16),
-                      label: Text(testing ? 'Testing connection…' : 'Test connection'),
+                      label: Text(
+                        testing ? 'Testing connection…' : 'Test connection',
+                      ),
                     ),
                   ),
                 ],
@@ -500,8 +637,18 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
               onPressed: () {
                 if (serviceUrlController.text.trim().isEmpty ||
                     modelController.text.trim().isEmpty) {
-                  setDialogState(() => connectionMessage =
-                      'Enter both a service URL and a model tag before saving.');
+                  setDialogState(
+                    () => connectionMessage =
+                        'Enter both a service URL and a model tag before saving.',
+                  );
+                  return;
+                }
+                final enteredUrl = serviceUrlController.text.trim();
+                if (!AppSettings.isLoopbackUrl(enteredUrl)) {
+                  setDialogState(
+                    () => connectionMessage =
+                        'Private mode strictly requires a loopback URL (127.0.0.1 or localhost). Non-loopback endpoints are rejected.',
+                  );
                   return;
                 }
                 setState(() {
@@ -540,19 +687,22 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
               _ExplainerRow(
                 number: '01',
                 title: 'Bring the error & context',
-                body: 'Paste the complete log, relevant Dart code, and project/runtime context.',
+                body:
+                    'Paste the complete log, relevant Dart code, and project/runtime context.',
               ),
               SizedBox(height: 18),
               _ExplainerRow(
                 number: '02',
                 title: 'Recall or diagnose locally',
-                body: 'Exact repeat errors recall instantly with 0 model calls. Changed context flags similar past fixes for review before running inference.',
+                body:
+                    'Exact repeat errors recall instantly with 0 model calls. Changed context flags similar past fixes for review before running inference.',
               ),
               SizedBox(height: 18),
               _ExplainerRow(
                 number: '03',
                 title: 'You control verification',
-                body: 'Saved fixes start UNVERIFIED. Only you mark a fix VERIFIED after running your own analyzer or tests. StackSoothe never executes code.',
+                body:
+                    'Saved fixes start UNVERIFIED. Only you mark a fix VERIFIED after running your own analyzer or tests. StackSoothe never executes code.',
               ),
             ],
           ),
@@ -569,81 +719,122 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final showSidebar = constraints.maxWidth >= 980;
-          return Row(
-            children: [
-              if (showSidebar) _buildSidebar(),
-              Expanded(
-                child: Column(
-                  children: [
-                    _buildTopBar(showSidebar),
-                    Expanded(
-                      child: LayoutBuilder(
-                        builder: (context, contentConstraints) => SingleChildScrollView(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: contentConstraints.maxWidth < 700 ? 18 : 32,
-                            vertical: 28,
-                          ),
-                          child: Center(
-                            child: ConstrainedBox(
-                              constraints: const BoxConstraints(maxWidth: 1160),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  if (_notebookStore.lastCorruptionWarning != null) ...[
-                                    _buildCorruptionWarningBanner(
-                                      _notebookStore.lastCorruptionWarning!,
+    return CallbackShortcuts(
+      bindings: <ShortcutActivator, VoidCallback>{
+        const SingleActivator(LogicalKeyboardKey.enter, control: true): () {
+          if (!_isDiagnosing) {
+            _runDiagnosis(forceFresh: false);
+          }
+        },
+        const SingleActivator(LogicalKeyboardKey.escape): () {
+          if (_isDiagnosing) {
+            _stopWaiting();
+          }
+        },
+      },
+      child: Focus(
+        autofocus: true,
+        child: Scaffold(
+          body: LayoutBuilder(
+            builder: (context, constraints) {
+              final showSidebar = constraints.maxWidth >= 980;
+              return Row(
+                children: [
+                  if (showSidebar) _buildSidebar(),
+                  Expanded(
+                    child: Column(
+                      children: [
+                        _buildTopBar(showSidebar),
+                        Expanded(
+                          child: LayoutBuilder(
+                            builder: (context, contentConstraints) =>
+                                SingleChildScrollView(
+                                  padding: EdgeInsets.symmetric(
+                                    horizontal:
+                                        contentConstraints.maxWidth < 700
+                                        ? 18
+                                        : 32,
+                                    vertical: 28,
+                                  ),
+                                  child: Center(
+                                    child: ConstrainedBox(
+                                      constraints: const BoxConstraints(
+                                        maxWidth: 1160,
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          if (_notebookStore
+                                                  .lastCorruptionWarning !=
+                                              null) ...[
+                                            _buildCorruptionWarningBanner(
+                                              _notebookStore
+                                                  .lastCorruptionWarning!,
+                                            ),
+                                            const SizedBox(height: 18),
+                                          ],
+                                          if (_activeNav == 'Notebook')
+                                            _buildNotebookView()
+                                          else ...[
+                                            _buildPageHeading(),
+                                            const SizedBox(height: 24),
+                                            _buildModeCard(),
+                                            const SizedBox(height: 20),
+                                            _buildInputArea(),
+                                            const SizedBox(height: 14),
+                                            _buildContextBar(),
+                                            const SizedBox(height: 14),
+                                            _buildExamples(),
+                                            const SizedBox(height: 22),
+                                            _buildActionRow(),
+                                            if (_detachedSnapshotNotification !=
+                                                null) ...[
+                                              const SizedBox(height: 14),
+                                              _buildDetachedSnapshotBanner(),
+                                            ],
+                                            if (_isBusyServiceState) ...[
+                                              const SizedBox(height: 14),
+                                              _buildBusyServiceBanner(),
+                                            ] else if (_errorMessage !=
+                                                null) ...[
+                                              const SizedBox(height: 16),
+                                              _buildErrorBanner(_errorMessage!),
+                                            ],
+                                            const SizedBox(height: 30),
+                                            if (_isDiagnosing)
+                                              _buildLoadingState(),
+                                            if (!_isDiagnosing &&
+                                                _pendingSimilarLookup != null)
+                                              _buildSimilarMatchReviewCard(
+                                                _pendingSimilarLookup!,
+                                              ),
+                                            if (!_isDiagnosing &&
+                                                _result != null)
+                                              _buildResult(_result!),
+                                            if (!_isDiagnosing &&
+                                                _result == null &&
+                                                _pendingSimilarLookup == null &&
+                                                _errorMessage == null)
+                                              _buildEmptyResults(),
+                                          ],
+                                          const SizedBox(height: 24),
+                                          _buildFooterNote(),
+                                        ],
+                                      ),
                                     ),
-                                    const SizedBox(height: 18),
-                                  ],
-                                  if (_activeNav == 'Notebook')
-                                    _buildNotebookView()
-                                  else ...[
-                                    _buildPageHeading(),
-                                    const SizedBox(height: 24),
-                                    _buildModeCard(),
-                                    const SizedBox(height: 20),
-                                    _buildInputArea(),
-                                    const SizedBox(height: 14),
-                                    _buildContextBar(),
-                                    const SizedBox(height: 14),
-                                    _buildExamples(),
-                                    const SizedBox(height: 22),
-                                    _buildActionRow(),
-                                    if (_errorMessage != null) ...[
-                                      const SizedBox(height: 16),
-                                      _buildErrorBanner(_errorMessage!),
-                                    ],
-                                    const SizedBox(height: 30),
-                                    if (_isDiagnosing) _buildLoadingState(),
-                                    if (!_isDiagnosing && _pendingSimilarLookup != null)
-                                      _buildSimilarMatchReviewCard(_pendingSimilarLookup!),
-                                    if (!_isDiagnosing && _result != null)
-                                      _buildResult(_result!),
-                                    if (!_isDiagnosing &&
-                                        _result == null &&
-                                        _pendingSimilarLookup == null &&
-                                        _errorMessage == null)
-                                      _buildEmptyResults(),
-                                  ],
-                                  const SizedBox(height: 24),
-                                  _buildFooterNote(),
-                                ],
-                              ),
-                            ),
+                                  ),
+                                ),
                           ),
                         ),
-                      ),
+                      ],
                     ),
-                  ],
-                ),
-              ),
-            ],
-          );
-        },
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
       ),
     );
   }
@@ -660,7 +851,11 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.restore_page_rounded, color: AppColors.warning, size: 20),
+          const Icon(
+            Icons.restore_page_rounded,
+            color: AppColors.warning,
+            size: 20,
+          ),
           const SizedBox(width: 11),
           Expanded(
             child: Column(
@@ -678,7 +873,11 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
                 const SizedBox(height: 4),
                 Text(
                   warningText,
-                  style: const TextStyle(color: Color(0xFFE7D5B7), fontSize: 12, height: 1.45),
+                  style: const TextStyle(
+                    color: Color(0xFFE7D5B7),
+                    fontSize: 12,
+                    height: 1.45,
+                  ),
                 ),
               ],
             ),
@@ -748,22 +947,45 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
               children: [
                 Row(
                   children: [
-                    Icon(Icons.shield_outlined, size: 17, color: AppColors.success),
+                    Icon(
+                      Icons.shield_outlined,
+                      size: 17,
+                      color: AppColors.success,
+                    ),
                     SizedBox(width: 7),
-                    Text('LOCAL-FIRST', style: TextStyle(fontSize: 10, letterSpacing: 1.1, fontWeight: FontWeight.w800, color: AppColors.success)),
+                    Text(
+                      'LOCAL-FIRST',
+                      style: TextStyle(
+                        fontSize: 10,
+                        letterSpacing: 1.1,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.success,
+                      ),
+                    ),
                   ],
                 ),
                 SizedBox(height: 8),
                 Text(
                   'Your code stays on your machine. Saved notebook entries are stored locally (unencrypted at rest; tokens never saved).',
-                  style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.5),
+                  style: TextStyle(
+                    color: AppColors.muted,
+                    fontSize: 11,
+                    height: 1.5,
+                  ),
                 ),
               ],
             ),
           ),
           const Padding(
             padding: EdgeInsets.fromLTRB(21, 0, 16, 18),
-            child: Text('STACKSOOTHE  ·  v0.1.0', style: TextStyle(color: AppColors.subtle, fontSize: 10, letterSpacing: 0.7)),
+            child: Text(
+              'STACKSOOTHE  ·  v0.1.0',
+              style: TextStyle(
+                color: AppColors.subtle,
+                fontSize: 10,
+                letterSpacing: 0.7,
+              ),
+            ),
           ),
         ],
       ),
@@ -785,7 +1007,11 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
             ),
             borderRadius: BorderRadius.circular(11),
           ),
-          child: const Icon(Icons.terminal_rounded, color: Color(0xFF110D26), size: 22),
+          child: const Icon(
+            Icons.terminal_rounded,
+            color: Color(0xFF110D26),
+            size: 22,
+          ),
         ),
         if (!compact) ...[
           const SizedBox(width: 10),
@@ -794,9 +1020,26 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text('StackSoothe', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, letterSpacing: -0.5), overflow: TextOverflow.ellipsis),
+                Text(
+                  'StackSoothe',
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.5,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
                 SizedBox(height: 2),
-                Text('DEBUG WITH LESS FRICTION', style: TextStyle(fontSize: 8, letterSpacing: 1.05, color: AppColors.muted, fontWeight: FontWeight.w700), overflow: TextOverflow.ellipsis),
+                Text(
+                  'DEBUG WITH LESS FRICTION',
+                  style: TextStyle(
+                    fontSize: 8,
+                    letterSpacing: 1.05,
+                    color: AppColors.muted,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ],
             ),
           ),
@@ -823,11 +1066,17 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(9),
-              border: Border.all(color: selected ? const Color(0x559A8CFF) : Colors.transparent),
+              border: Border.all(
+                color: selected ? const Color(0x559A8CFF) : Colors.transparent,
+              ),
             ),
             child: Row(
               children: [
-                Icon(icon, size: 18, color: selected ? AppColors.accent : AppColors.muted),
+                Icon(
+                  icon,
+                  size: 18,
+                  color: selected ? AppColors.accent : AppColors.muted,
+                ),
                 const SizedBox(width: 11),
                 Expanded(
                   child: Text(
@@ -841,7 +1090,14 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
                   ),
                 ),
                 if (selected)
-                  Container(width: 5, height: 5, decoration: const BoxDecoration(color: AppColors.accent, shape: BoxShape.circle)),
+                  Container(
+                    width: 5,
+                    height: 5,
+                    decoration: const BoxDecoration(
+                      color: AppColors.accent,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
               ],
             ),
           ),
@@ -864,18 +1120,36 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
           if (!showSidebar) ...[
             _buildBrand(compact: true),
             const SizedBox(width: 12),
-            const Icon(Icons.chevron_right_rounded, size: 18, color: AppColors.subtle),
+            const Icon(
+              Icons.chevron_right_rounded,
+              size: 18,
+              color: AppColors.subtle,
+            ),
             const SizedBox(width: 3),
           ],
           if (showSidebar) ...[
-            const Icon(Icons.grid_view_rounded, size: 16, color: AppColors.muted),
+            const Icon(
+              Icons.grid_view_rounded,
+              size: 16,
+              color: AppColors.muted,
+            ),
             const SizedBox(width: 10),
-            const Text('Workspace', style: TextStyle(color: AppColors.muted, fontSize: 12)),
+            const Text(
+              'Workspace',
+              style: TextStyle(color: AppColors.muted, fontSize: 12),
+            ),
             const SizedBox(width: 9),
-            const Icon(Icons.chevron_right_rounded, size: 16, color: AppColors.subtle),
+            const Icon(
+              Icons.chevron_right_rounded,
+              size: 16,
+              color: AppColors.subtle,
+            ),
             const SizedBox(width: 5),
           ],
-          Text(_activeNav, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+          Text(
+            _activeNav,
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+          ),
           const Spacer(),
           OutlinedButton.icon(
             key: const Key('open_notebook_button'),
@@ -900,7 +1174,9 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
             style: IconButton.styleFrom(
               foregroundColor: AppColors.muted,
               side: const BorderSide(color: AppColors.border),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(9),
+              ),
             ),
           ),
         ],
@@ -914,15 +1190,35 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
       children: [
         Row(
           children: [
-            Container(width: 7, height: 7, decoration: const BoxDecoration(color: AppColors.accent, shape: BoxShape.circle)),
+            Container(
+              width: 7,
+              height: 7,
+              decoration: const BoxDecoration(
+                color: AppColors.accent,
+                shape: BoxShape.circle,
+              ),
+            ),
             const SizedBox(width: 8),
-            const Text('FLUTTER / DEBUGGING WORKSPACE', style: TextStyle(color: AppColors.accent, fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 1.4)),
+            const Text(
+              'FLUTTER / DEBUGGING WORKSPACE',
+              style: TextStyle(
+                color: AppColors.accent,
+                fontSize: 10,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 1.4,
+              ),
+            ),
           ],
         ),
         const SizedBox(height: 14),
         const Text(
           'Let’s untangle that error.',
-          style: TextStyle(fontSize: 31, height: 1.1, fontWeight: FontWeight.w800, letterSpacing: -1.1),
+          style: TextStyle(
+            fontSize: 31,
+            height: 1.1,
+            fontWeight: FontWeight.w800,
+            letterSpacing: -1.1,
+          ),
         ),
         const SizedBox(height: 10),
         const Text(
@@ -982,7 +1278,11 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
                   _useLocalAi
                       ? 'Local service · $_model · Prompts are routed to loopback service.'
                       : 'Instant sample diagnoses · No model setup required.',
-                  style: const TextStyle(color: AppColors.muted, fontSize: 11, height: 1.5),
+                  style: const TextStyle(
+                    color: AppColors.muted,
+                    fontSize: 11,
+                    height: 1.5,
+                  ),
                 ),
               ],
             );
@@ -997,7 +1297,10 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
                   children: [
                     Text('DIAGNOSIS ENGINE', style: _eyebrowStyle),
                     SizedBox(height: 5),
-                    Text('Choose how StackSoothe analyzes your input.', style: TextStyle(color: AppColors.muted, fontSize: 11)),
+                    Text(
+                      'Choose how StackSoothe analyzes your input.',
+                      style: TextStyle(color: AppColors.muted, fontSize: 11),
+                    ),
                   ],
                 ),
               ),
@@ -1028,14 +1331,27 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(9),
-            border: Border.all(color: selected ? AppColors.accent : AppColors.border),
+            border: Border.all(
+              color: selected ? AppColors.accent : AppColors.border,
+            ),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 16, color: selected ? AppColors.accent : AppColors.muted),
+              Icon(
+                icon,
+                size: 16,
+                color: selected ? AppColors.accent : AppColors.muted,
+              ),
               const SizedBox(width: 7),
-              Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: selected ? AppColors.text : AppColors.muted)),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: selected ? AppColors.text : AppColors.muted,
+                ),
+              ),
             ],
           ),
         ),
@@ -1092,7 +1408,10 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
           final projectField = Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('PROJECT CONTEXT (FINGERPRINT SCOPE)', style: _eyebrowStyle),
+              const Text(
+                'PROJECT CONTEXT (FINGERPRINT SCOPE)',
+                style: _eyebrowStyle,
+              ),
               const SizedBox(height: 7),
               TextField(
                 key: const Key('project_context_field'),
@@ -1135,11 +1454,7 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
             );
           }
           return Column(
-            children: [
-              projectField,
-              const SizedBox(height: 12),
-              runtimeField,
-            ],
+            children: [projectField, const SizedBox(height: 12), runtimeField],
           );
         },
       ),
@@ -1167,7 +1482,14 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
             children: [
               Icon(icon, size: 16, color: AppColors.accent),
               const SizedBox(width: 8),
-              Text(title, style: const TextStyle(fontSize: 10, letterSpacing: 1.05, fontWeight: FontWeight.w800)),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 10,
+                  letterSpacing: 1.05,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
               const Spacer(),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
@@ -1175,7 +1497,15 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
                   color: AppColors.surfaceRaised,
                   borderRadius: BorderRadius.circular(5),
                 ),
-                child: Text(badge, style: const TextStyle(fontSize: 8, color: AppColors.muted, letterSpacing: 0.6, fontWeight: FontWeight.w800)),
+                child: Text(
+                  badge,
+                  style: const TextStyle(
+                    fontSize: 8,
+                    color: AppColors.muted,
+                    letterSpacing: 0.6,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
               ),
             ],
           ),
@@ -1184,9 +1514,22 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
           const SizedBox(height: 10),
           Row(
             children: [
-              const Icon(Icons.info_outline_rounded, size: 13, color: AppColors.subtle),
+              const Icon(
+                Icons.info_outline_rounded,
+                size: 13,
+                color: AppColors.subtle,
+              ),
               const SizedBox(width: 6),
-              Expanded(child: Text(helper, style: const TextStyle(color: AppColors.subtle, fontSize: 10, height: 1.35))),
+              Expanded(
+                child: Text(
+                  helper,
+                  style: const TextStyle(
+                    color: AppColors.subtle,
+                    fontSize: 10,
+                    height: 1.35,
+                  ),
+                ),
+              ),
             ],
           ),
         ],
@@ -1205,7 +1548,12 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
         maxLines: null,
         keyboardType: TextInputType.multiline,
         textAlignVertical: TextAlignVertical.top,
-        style: const TextStyle(fontFamily: 'Consolas', fontSize: 11, height: 1.55, color: Color(0xFFD5DDED)),
+        style: const TextStyle(
+          fontFamily: 'Consolas',
+          fontSize: 11,
+          height: 1.55,
+          color: Color(0xFFD5DDED),
+        ),
         decoration: const InputDecoration(
           hintText: 'Paste your Flutter error here…',
           contentPadding: EdgeInsets.all(13),
@@ -1227,7 +1575,12 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
         maxLines: null,
         keyboardType: TextInputType.multiline,
         textAlignVertical: TextAlignVertical.top,
-        style: const TextStyle(fontFamily: 'Consolas', fontSize: 11, height: 1.55, color: Color(0xFFB6C6DD)),
+        style: const TextStyle(
+          fontFamily: 'Consolas',
+          fontSize: 11,
+          height: 1.55,
+          color: Color(0xFFB6C6DD),
+        ),
         decoration: const InputDecoration(
           hintText: 'Paste the relevant Dart code…',
           contentPadding: EdgeInsets.all(13),
@@ -1246,7 +1599,15 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
       children: [
         const Padding(
           padding: EdgeInsets.only(right: 2),
-          child: Text('TRY AN EXAMPLE', style: TextStyle(color: AppColors.subtle, fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 1)),
+          child: Text(
+            'TRY AN EXAMPLE',
+            style: TextStyle(
+              color: AppColors.subtle,
+              fontSize: 9,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1,
+            ),
+          ),
         ),
         _exampleChip('BuildContext async gap', 'context'),
         _exampleChip('Null check operator', 'null'),
@@ -1277,7 +1638,11 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
         Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.lock_outline_rounded, size: 14, color: AppColors.success),
+            const Icon(
+              Icons.lock_outline_rounded,
+              size: 14,
+              color: AppColors.success,
+            ),
             const SizedBox(width: 7),
             Text(
               'No cloud API · No code execution · Model calls this session: $_modelInvocationCount',
@@ -1296,17 +1661,109 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
               label: const Text('Clear'),
             ),
             const SizedBox(width: 9),
-            FilledButton.icon(
-              key: const Key('diagnose_button'),
-              onPressed: _isDiagnosing ? null : () => _runDiagnosis(forceFresh: false),
-              icon: _isDiagnosing
-                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF100D22)))
-                  : const Icon(Icons.auto_awesome_rounded, size: 17),
-              label: Text(_isDiagnosing ? 'Analyzing…' : 'Diagnose error'),
-            ),
+            if (_isDiagnosing)
+              FilledButton.tonalIcon(
+                key: const Key('stop_waiting_button'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0x33FF6B6B),
+                  foregroundColor: const Color(0xFFFF8E8E),
+                ),
+                onPressed: _stopWaiting,
+                icon: const Icon(Icons.stop_circle_outlined, size: 17),
+                label: const Text('Stop waiting — model may continue'),
+              )
+            else
+              FilledButton.icon(
+                key: const Key('diagnose_button'),
+                onPressed: () => _runDiagnosis(forceFresh: false),
+                icon: const Icon(Icons.auto_awesome_rounded, size: 17),
+                label: const Text('Diagnose error'),
+              ),
           ],
         ),
       ],
+    );
+  }
+
+  Widget _buildDetachedSnapshotBanner() {
+    return Container(
+      key: const Key('detached_snapshot_banner'),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0x1F80D8FF),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.cyan),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.info_outline_rounded,
+            color: AppColors.cyan,
+            size: 18,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              _detachedSnapshotNotification!,
+              style: const TextStyle(
+                color: Color(0xFFC0EEFF),
+                fontSize: 12,
+                height: 1.4,
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Dismiss notification',
+            icon: const Icon(
+              Icons.close_rounded,
+              size: 16,
+              color: AppColors.muted,
+            ),
+            onPressed: () =>
+                setState(() => _detachedSnapshotNotification = null),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBusyServiceBanner() {
+    return Container(
+      key: const Key('busy_service_banner'),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0x22FFA500),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.orangeAccent),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.hourglass_top_rounded,
+            color: Colors.orangeAccent,
+            size: 20,
+          ),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Text(
+              'Local service is currently busy completing a previous model request. Please wait a moment before retrying.',
+              style: TextStyle(
+                color: Color(0xFFFFD580),
+                fontSize: 12,
+                height: 1.4,
+              ),
+            ),
+          ),
+          TextButton.icon(
+            key: const Key('retry_busy_button'),
+            onPressed: () => _runDiagnosis(forceFresh: true),
+            icon: const Icon(Icons.refresh_rounded, size: 16),
+            label: const Text('Retry now', style: TextStyle(fontSize: 12)),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1331,7 +1788,11 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
         children: [
           Row(
             children: [
-              const Icon(Icons.history_edu_rounded, color: AppColors.warning, size: 20),
+              const Icon(
+                Icons.history_edu_rounded,
+                color: AppColors.warning,
+                size: 20,
+              ),
               const SizedBox(width: 9),
               const Expanded(
                 child: Text(
@@ -1353,7 +1814,11 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
                 ),
                 child: Text(
                   'Past status: ${topCandidate.verificationStatus.toJsonValue()}',
-                  style: const TextStyle(fontSize: 10, color: AppColors.muted, fontWeight: FontWeight.w700),
+                  style: const TextStyle(
+                    fontSize: 10,
+                    color: AppColors.muted,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
             ],
@@ -1363,7 +1828,11 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
             'This error signature matches "${topCandidate.diagnosis.title}" saved under '
             'project "${topCandidate.projectContext}" (${topCandidate.runtimeContext}), '
             'but your $changedParts changed. StackSoothe will not silently reuse a past fix when context changes.',
-            style: const TextStyle(color: Color(0xFFE7D5B7), fontSize: 12, height: 1.5),
+            style: const TextStyle(
+              color: Color(0xFFE7D5B7),
+              fontSize: 12,
+              height: 1.5,
+            ),
           ),
           const SizedBox(height: 14),
           Wrap(
@@ -1412,9 +1881,22 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.warning_amber_rounded, color: AppColors.danger, size: 18),
+          const Icon(
+            Icons.warning_amber_rounded,
+            color: AppColors.danger,
+            size: 18,
+          ),
           const SizedBox(width: 10),
-          Expanded(child: Text(message, style: const TextStyle(color: Color(0xFFFFC9CB), fontSize: 12, height: 1.45))),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(
+                color: Color(0xFFFFC9CB),
+                fontSize: 12,
+                height: 1.45,
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -1431,15 +1913,45 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
       ),
       child: Column(
         children: [
-          const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5, color: AppColors.accent)),
+          const SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.5,
+              color: AppColors.accent,
+            ),
+          ),
           const SizedBox(height: 14),
-          Text(_useLocalAi ? 'Asking $_model to inspect the error…' : 'Inspecting the error pattern…', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+          Text(
+            _useLocalAi
+                ? 'Asking ${_inFlightSnapshot?.model ?? _model} to inspect the error…'
+                : 'Inspecting the error pattern…',
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+          ),
           const SizedBox(height: 6),
-          const Text('Looking for a likely cause and practical next steps.', style: TextStyle(color: AppColors.muted, fontSize: 11)),
+          const Text(
+            'Looking for a likely cause and practical next steps.',
+            style: TextStyle(color: AppColors.muted, fontSize: 11),
+          ),
           const SizedBox(height: 18),
           const ClipRRect(
             borderRadius: BorderRadius.all(Radius.circular(99)),
-            child: LinearProgressIndicator(minHeight: 3, backgroundColor: AppColors.border, color: AppColors.accent),
+            child: LinearProgressIndicator(
+              minHeight: 3,
+              backgroundColor: AppColors.border,
+              color: AppColors.accent,
+            ),
+          ),
+          const SizedBox(height: 18),
+          OutlinedButton.icon(
+            key: const Key('stop_waiting_loading_button'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFFFF8E8E),
+              side: const BorderSide(color: Color(0x66FF6B6B)),
+            ),
+            onPressed: _stopWaiting,
+            icon: const Icon(Icons.stop_circle_outlined, size: 16),
+            label: const Text('Stop waiting — model may continue'),
           ),
         ],
       ),
@@ -1448,6 +1960,7 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
 
   Widget _buildEmptyResults() {
     return Container(
+      key: const Key('empty_results_card'),
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 23),
       decoration: BoxDecoration(
@@ -1460,22 +1973,43 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
           Container(
             width: 43,
             height: 43,
-            decoration: BoxDecoration(color: const Color(0x229A8CFF), borderRadius: BorderRadius.circular(12)),
-            child: const Icon(Icons.query_stats_rounded, color: AppColors.accent, size: 22),
+            decoration: BoxDecoration(
+              color: const Color(0x229A8CFF),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(
+              Icons.query_stats_rounded,
+              color: AppColors.accent,
+              size: 22,
+            ),
           ),
           const SizedBox(width: 15),
           const Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Your diagnosis will appear here', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+                Text(
+                  'Your diagnosis will appear here',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                ),
                 SizedBox(height: 5),
-                Text('Run the preloaded example, or paste an error from your own Flutter project.', style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.45)),
+                Text(
+                  'Run the preloaded example, or paste an error from your own Flutter project.',
+                  style: TextStyle(
+                    color: AppColors.muted,
+                    fontSize: 11,
+                    height: 1.45,
+                  ),
+                ),
               ],
             ),
           ),
           const SizedBox(width: 12),
-          const Icon(Icons.arrow_downward_rounded, color: AppColors.subtle, size: 18),
+          const Icon(
+            Icons.arrow_downward_rounded,
+            color: AppColors.subtle,
+            size: 18,
+          ),
         ],
       ),
     );
@@ -1507,8 +2041,15 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
                 Container(
                   width: 38,
                   height: 38,
-                  decoration: BoxDecoration(color: const Color(0x229A8CFF), borderRadius: BorderRadius.circular(10)),
-                  child: const Icon(Icons.auto_awesome_rounded, color: AppColors.accent, size: 20),
+                  decoration: BoxDecoration(
+                    color: const Color(0x229A8CFF),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(
+                    Icons.auto_awesome_rounded,
+                    color: AppColors.accent,
+                    size: 20,
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -1516,11 +2057,29 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        result.isRecalled ? 'RECALLED DIAGNOSIS REPORT' : 'FRESH DIAGNOSIS REPORT',
-                        style: const TextStyle(color: AppColors.muted, fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 1.15),
+                        result.isDemo
+                            ? 'RULE-BASED EXAMPLE (NOT AI INFERENCE)'
+                            : (result.isRecalled
+                                  ? 'RECALLED DIAGNOSIS REPORT'
+                                  : 'FRESH LOCAL MODEL DIAGNOSIS'),
+                        style: TextStyle(
+                          color: result.isDemo
+                              ? AppColors.warning
+                              : AppColors.muted,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.15,
+                        ),
                       ),
                       const SizedBox(height: 4),
-                      Text(result.title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, height: 1.3)),
+                      Text(
+                        result.title,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          height: 1.3,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -1556,51 +2115,106 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const _SectionHeading(icon: Icons.subject_rounded, title: 'IN PLAIN ENGLISH'),
+                      const _SectionHeading(
+                        icon: Icons.subject_rounded,
+                        title: 'IN PLAIN ENGLISH',
+                      ),
                       const SizedBox(height: 10),
-                      Text(result.summary, style: const TextStyle(color: Color(0xFFD0DAE8), fontSize: 12, height: 1.65)),
+                      Text(
+                        result.summary,
+                        style: const TextStyle(
+                          color: Color(0xFFD0DAE8),
+                          fontSize: 12,
+                          height: 1.65,
+                        ),
+                      ),
                     ],
                   ),
                 ),
                 const SizedBox(height: 18),
-                const _SectionHeading(icon: Icons.manage_search_rounded, title: 'LIKELY CAUSE'),
+                const _SectionHeading(
+                  icon: Icons.manage_search_rounded,
+                  title: 'LIKELY CAUSE',
+                ),
                 const SizedBox(height: 9),
-                Text(result.likelyCause, style: const TextStyle(color: Color(0xFFD0DAE8), fontSize: 12, height: 1.65)),
+                Text(
+                  result.likelyCause,
+                  style: const TextStyle(
+                    color: Color(0xFFD0DAE8),
+                    fontSize: 12,
+                    height: 1.65,
+                  ),
+                ),
                 const SizedBox(height: 9),
                 Row(
                   children: [
-                    const Icon(Icons.insights_rounded, size: 14, color: AppColors.cyan),
+                    const Icon(
+                      Icons.insights_rounded,
+                      size: 14,
+                      color: AppColors.cyan,
+                    ),
                     const SizedBox(width: 6),
-                    Text('Confidence: ${result.confidence}', style: const TextStyle(color: AppColors.cyan, fontSize: 10, fontWeight: FontWeight.w700)),
+                    Text(
+                      'Confidence: ${result.confidence}',
+                      style: const TextStyle(
+                        color: AppColors.cyan,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                     const Spacer(),
                     Text(
                       result.isDemo
                           ? 'RULE-BASED EXAMPLE · PROMPT ${result.promptVersion}'
                           : 'MODEL: ${result.modelName.toUpperCase()} · PROMPT ${result.promptVersion}',
-                      style: const TextStyle(color: AppColors.subtle, fontSize: 9, letterSpacing: 0.6, fontWeight: FontWeight.w700),
+                      style: const TextStyle(
+                        color: AppColors.subtle,
+                        fontSize: 9,
+                        letterSpacing: 0.6,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 22),
-                const _SectionHeading(icon: Icons.route_rounded, title: 'SUGGESTED DEBUGGING STEPS'),
+                const _SectionHeading(
+                  icon: Icons.route_rounded,
+                  title: 'SUGGESTED DEBUGGING STEPS',
+                ),
                 const SizedBox(height: 12),
-                ...List.generate(result.steps.length, (index) => _numberedStep(index + 1, result.steps[index])),
+                ...List.generate(
+                  result.steps.length,
+                  (index) => _numberedStep(index + 1, result.steps[index]),
+                ),
                 const SizedBox(height: 14),
-                const _SectionHeading(icon: Icons.fact_check_outlined, title: 'VERIFY THE FIX'),
+                const _SectionHeading(
+                  icon: Icons.fact_check_outlined,
+                  title: 'VERIFY THE FIX',
+                ),
                 const SizedBox(height: 11),
                 ...result.verification.map(_verificationItem),
                 if (result.codeExample.trim().isNotEmpty) ...[
                   const SizedBox(height: 22),
                   Row(
                     children: [
-                      const Expanded(child: _SectionHeading(icon: Icons.code_rounded, title: 'EXAMPLE APPROACH')),
+                      const Expanded(
+                        child: _SectionHeading(
+                          icon: Icons.code_rounded,
+                          title: 'EXAMPLE APPROACH',
+                        ),
+                      ),
                       IconButton(
                         tooltip: 'Copy example',
                         onPressed: () async {
-                          await Clipboard.setData(ClipboardData(text: result.codeExample));
+                          await Clipboard.setData(
+                            ClipboardData(text: result.codeExample),
+                          );
                           if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Code example copied'), behavior: SnackBarBehavior.floating),
+                              const SnackBar(
+                                content: Text('Code example copied'),
+                                behavior: SnackBarBehavior.floating,
+                              ),
                             );
                           }
                         },
@@ -1620,7 +2234,12 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
                     ),
                     child: SelectableText(
                       result.codeExample,
-                      style: const TextStyle(fontFamily: 'Consolas', color: Color(0xFFBEE9D8), fontSize: 11, height: 1.6),
+                      style: const TextStyle(
+                        fontFamily: 'Consolas',
+                        color: Color(0xFFBEE9D8),
+                        fontSize: 11,
+                        height: 1.6,
+                      ),
                     ),
                   ),
                 ],
@@ -1635,12 +2254,20 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
                   child: const Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(Icons.lightbulb_outline_rounded, color: AppColors.warning, size: 16),
+                      Icon(
+                        Icons.lightbulb_outline_rounded,
+                        color: AppColors.warning,
+                        size: 16,
+                      ),
                       SizedBox(width: 9),
                       Expanded(
                         child: Text(
                           'Treat this as a debugging lead, not proof. Review the suggested change and run your own analyzer or tests before accepting a fix.',
-                          style: TextStyle(color: Color(0xFFE7D5B7), fontSize: 10, height: 1.55),
+                          style: TextStyle(
+                            color: Color(0xFFE7D5B7),
+                            fontSize: 10,
+                            height: 1.55,
+                          ),
                         ),
                       ),
                     ],
@@ -1672,7 +2299,11 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.bookmark_added_rounded, color: AppColors.success, size: 17),
+              const Icon(
+                Icons.bookmark_added_rounded,
+                color: AppColors.success,
+                size: 17,
+              ),
               const SizedBox(width: 8),
               Flexible(
                 child: Text(
@@ -1691,7 +2322,10 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
             key: const Key('run_fresh_from_exact_button'),
             onPressed: () => _runDiagnosis(forceFresh: true),
             icon: const Icon(Icons.refresh_rounded, size: 15),
-            label: const Text('Run Fresh Diagnosis', style: TextStyle(fontSize: 11)),
+            label: const Text(
+              'Run Fresh Diagnosis',
+              style: TextStyle(fontSize: 11),
+            ),
           ),
         ],
       ),
@@ -1716,7 +2350,11 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.warning_amber_rounded, color: AppColors.warning, size: 17),
+              const Icon(
+                Icons.warning_amber_rounded,
+                color: AppColors.warning,
+                size: 17,
+              ),
               const SizedBox(width: 8),
               Flexible(
                 child: Text(
@@ -1735,7 +2373,10 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
             key: const Key('run_fresh_from_stale_banner_button'),
             onPressed: () => _runDiagnosis(forceFresh: true),
             icon: const Icon(Icons.bolt_rounded, size: 15),
-            label: const Text('Run Fresh Diagnosis', style: TextStyle(fontSize: 11)),
+            label: const Text(
+              'Run Fresh Diagnosis',
+              style: TextStyle(fontSize: 11),
+            ),
           ),
         ],
       ),
@@ -1743,6 +2384,27 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
   }
 
   Widget _verificationStatusBadge(NotebookEntry? entry) {
+    if (_result?.isDemo == true) {
+      return Container(
+        key: const Key('demo_rule_based_badge'),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        decoration: BoxDecoration(
+          color: const Color(0x26FFA500),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: Colors.orangeAccent),
+        ),
+        child: const Text(
+          'RULE-BASED · NOT AI',
+          style: TextStyle(
+            color: Color(0xFFFFC570),
+            fontSize: 9,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 0.6,
+          ),
+        ),
+      );
+    }
+
     if (entry == null) {
       return Container(
         key: const Key('status_unsaved_badge'),
@@ -1753,8 +2415,12 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
           border: Border.all(color: AppColors.border),
         ),
         child: const Text(
-          'NOT SAVED',
-          style: TextStyle(color: AppColors.muted, fontSize: 9, fontWeight: FontWeight.w800),
+          'FRESH · NOT SAVED',
+          style: TextStyle(
+            color: AppColors.muted,
+            fontSize: 9,
+            fontWeight: FontWeight.w800,
+          ),
         ),
       );
     }
@@ -1770,7 +2436,11 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
         ),
         child: const Text(
           'CONTEXT MISMATCH · STALE',
-          style: TextStyle(color: AppColors.warning, fontSize: 9, fontWeight: FontWeight.w900),
+          style: TextStyle(
+            color: AppColors.warning,
+            fontSize: 9,
+            fontWeight: FontWeight.w900,
+          ),
         ),
       );
     }
@@ -1786,7 +2456,11 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
         ),
         child: const Text(
           'VERIFIED BY USER',
-          style: TextStyle(color: AppColors.success, fontSize: 9, fontWeight: FontWeight.w900),
+          style: TextStyle(
+            color: AppColors.success,
+            fontSize: 9,
+            fontWeight: FontWeight.w900,
+          ),
         ),
       );
     }
@@ -1801,7 +2475,11 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
       ),
       child: const Text(
         'UNVERIFIED',
-        style: TextStyle(color: AppColors.warning, fontSize: 9, fontWeight: FontWeight.w900),
+        style: TextStyle(
+          color: AppColors.warning,
+          fontSize: 9,
+          fontWeight: FontWeight.w900,
+        ),
       ),
     );
   }
@@ -1863,20 +2541,35 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
         children: [
           Row(
             children: [
-              const Icon(Icons.verified_user_outlined, size: 15, color: AppColors.accent),
+              const Icon(
+                Icons.verified_user_outlined,
+                size: 15,
+                color: AppColors.accent,
+              ),
               const SizedBox(width: 8),
               Text(
                 entry.isVerified
                     ? 'USER VERIFICATION: VERIFIED (${entry.verifiedAtIso ?? ''})'
                     : 'USER VERIFICATION: UNVERIFIED (AI never self-certifies)',
-                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 0.7),
+                style: const TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.7,
+                ),
               ),
               const Spacer(),
               TextButton.icon(
                 key: const Key('delete_active_entry_button'),
                 onPressed: () => _deleteEntry(entry.id),
-                icon: const Icon(Icons.delete_outline_rounded, size: 15, color: AppColors.danger),
-                label: const Text('Delete entry', style: TextStyle(color: AppColors.danger, fontSize: 11)),
+                icon: const Icon(
+                  Icons.delete_outline_rounded,
+                  size: 15,
+                  color: AppColors.danger,
+                ),
+                label: const Text(
+                  'Delete entry',
+                  style: TextStyle(color: AppColors.danger, fontSize: 11),
+                ),
               ),
             ],
           ),
@@ -1890,7 +2583,8 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
                   style: const TextStyle(fontSize: 12),
                   decoration: const InputDecoration(
                     isDense: true,
-                    hintText: 'Optional verification command/outcome (e.g., flutter test passed)',
+                    hintText:
+                        'Optional verification command/outcome (e.g., flutter test passed)',
                   ),
                 ),
               ),
@@ -1898,20 +2592,26 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
               if (!entry.isVerified)
                 FilledButton.icon(
                   key: const Key('mark_verified_button'),
-                  onPressed: () => _updateEntryVerification(VerificationStatus.verified),
-                  icon: const Icon(Icons.check_circle_outline_rounded, size: 16),
+                  onPressed: () =>
+                      _updateEntryVerification(VerificationStatus.verified),
+                  icon: const Icon(
+                    Icons.check_circle_outline_rounded,
+                    size: 16,
+                  ),
                   label: const Text('Mark Verified'),
                 )
               else
                 OutlinedButton.icon(
                   key: const Key('mark_unverified_button'),
-                  onPressed: () => _updateEntryVerification(VerificationStatus.unverified),
+                  onPressed: () =>
+                      _updateEntryVerification(VerificationStatus.unverified),
                   icon: const Icon(Icons.undo_rounded, size: 16),
                   label: const Text('Mark Unverified'),
                 ),
             ],
           ),
-          if (entry.verificationNote != null && entry.verificationNote!.isNotEmpty) ...[
+          if (entry.verificationNote != null &&
+              entry.verificationNote!.isNotEmpty) ...[
             const SizedBox(height: 8),
             Text(
               'Recorded verification outcome: ${entry.verificationNote}',
@@ -1935,9 +2635,20 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('LOCAL FIX NOTEBOOK', style: TextStyle(color: AppColors.accent, fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 1.4)),
+                  Text(
+                    'LOCAL FIX NOTEBOOK',
+                    style: TextStyle(
+                      color: AppColors.accent,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.4,
+                    ),
+                  ),
                   SizedBox(height: 8),
-                  Text('Saved diagnoses & verification state', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
+                  Text(
+                    'Saved diagnoses & verification state',
+                    style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800),
+                  ),
                 ],
               ),
             ),
@@ -1945,8 +2656,15 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
               OutlinedButton.icon(
                 key: const Key('clear_all_notebook_button'),
                 onPressed: _clearAllNotebookHistory,
-                icon: const Icon(Icons.delete_sweep_outlined, size: 16, color: AppColors.danger),
-                label: const Text('Clear All History', style: TextStyle(color: AppColors.danger)),
+                icon: const Icon(
+                  Icons.delete_sweep_outlined,
+                  size: 16,
+                  color: AppColors.danger,
+                ),
+                label: const Text(
+                  'Clear All History',
+                  style: TextStyle(color: AppColors.danger),
+                ),
               ),
           ],
         ),
@@ -1972,77 +2690,100 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
             ),
           )
         else
-          ...entries.map((entry) => Container(
-                key: Key('notebook_row_${entry.id}'),
-                margin: const EdgeInsets.only(bottom: 12),
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: AppColors.surface,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppColors.border),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Text(
-                                entry.diagnosis.title,
-                                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
-                              ),
-                              const SizedBox(width: 10),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                                decoration: BoxDecoration(
-                                  color: (entry.isVerified ? AppColors.success : AppColors.warning)
-                                      .withValues(alpha: 0.14),
-                                  borderRadius: BorderRadius.circular(5),
-                                ),
-                                child: Text(
-                                  entry.verificationStatus.toJsonValue(),
-                                  style: TextStyle(
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.w900,
-                                    color: entry.isVerified ? AppColors.success : AppColors.warning,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            'Project: ${entry.projectContext} · Runtime: ${entry.runtimeContext} · '
-                            'Model: ${entry.modelName} (prompt ${entry.promptVersion})',
-                            style: const TextStyle(color: AppColors.muted, fontSize: 11),
-                          ),
-                          if (entry.verificationNote != null && entry.verificationNote!.isNotEmpty) ...[
-                            const SizedBox(height: 4),
+          ...entries.map(
+            (entry) => Container(
+              key: Key('notebook_row_${entry.id}'),
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
                             Text(
-                              'Verification note: ${entry.verificationNote}',
-                              style: const TextStyle(color: AppColors.success, fontSize: 11),
+                              entry.diagnosis.title,
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 7,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color:
+                                    (entry.isVerified
+                                            ? AppColors.success
+                                            : AppColors.warning)
+                                        .withValues(alpha: 0.14),
+                                borderRadius: BorderRadius.circular(5),
+                              ),
+                              child: Text(
+                                entry.verificationStatus.toJsonValue(),
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w900,
+                                  color: entry.isVerified
+                                      ? AppColors.success
+                                      : AppColors.warning,
+                                ),
+                              ),
                             ),
                           ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Project: ${entry.projectContext} · Runtime: ${entry.runtimeContext} · '
+                          'Model: ${entry.modelName} (prompt ${entry.promptVersion})',
+                          style: const TextStyle(
+                            color: AppColors.muted,
+                            fontSize: 11,
+                          ),
+                        ),
+                        if (entry.verificationNote != null &&
+                            entry.verificationNote!.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            'Verification note: ${entry.verificationNote}',
+                            style: const TextStyle(
+                              color: AppColors.success,
+                              fontSize: 11,
+                            ),
+                          ),
                         ],
-                      ),
+                      ],
                     ),
-                    OutlinedButton(
-                      key: Key('load_entry_${entry.id}'),
-                      onPressed: () => _loadNotebookEntryIntoWorkspace(entry),
-                      child: const Text('Load'),
+                  ),
+                  OutlinedButton(
+                    key: Key('load_entry_${entry.id}'),
+                    onPressed: () => _loadNotebookEntryIntoWorkspace(entry),
+                    child: const Text('Load'),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    key: Key('delete_entry_${entry.id}'),
+                    tooltip: 'Delete entry',
+                    onPressed: () => _deleteEntry(entry.id),
+                    icon: const Icon(
+                      Icons.delete_outline_rounded,
+                      color: AppColors.danger,
                     ),
-                    const SizedBox(width: 8),
-                    IconButton(
-                      key: Key('delete_entry_${entry.id}'),
-                      tooltip: 'Delete entry',
-                      onPressed: () => _deleteEntry(entry.id),
-                      icon: const Icon(Icons.delete_outline_rounded, color: AppColors.danger),
-                    ),
-                  ],
-                ),
-              )),
+                  ),
+                ],
+              ),
+            ),
+          ),
       ],
     );
   }
@@ -2070,7 +2811,12 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
       ),
       child: Text(
         normalized.toUpperCase(),
-        style: TextStyle(color: color, fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 0.5),
+        style: TextStyle(
+          color: color,
+          fontSize: 9,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 0.5,
+        ),
       ),
     );
   }
@@ -2090,10 +2836,29 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
               border: Border.all(color: const Color(0x559A8CFF)),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Text('$number', style: const TextStyle(color: AppColors.accent, fontWeight: FontWeight.w800, fontSize: 10)),
+            child: Text(
+              '$number',
+              style: const TextStyle(
+                color: AppColors.accent,
+                fontWeight: FontWeight.w800,
+                fontSize: 10,
+              ),
+            ),
           ),
           const SizedBox(width: 11),
-          Expanded(child: Padding(padding: const EdgeInsets.only(top: 3), child: Text(text, style: const TextStyle(color: Color(0xFFD0DAE8), fontSize: 12, height: 1.55)))),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Text(
+                text,
+                style: const TextStyle(
+                  color: Color(0xFFD0DAE8),
+                  fontSize: 12,
+                  height: 1.55,
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -2107,10 +2872,23 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
         children: [
           const Padding(
             padding: EdgeInsets.only(top: 2),
-            child: Icon(Icons.check_circle_outline_rounded, size: 15, color: AppColors.success),
+            child: Icon(
+              Icons.check_circle_outline_rounded,
+              size: 15,
+              color: AppColors.success,
+            ),
           ),
           const SizedBox(width: 9),
-          Expanded(child: Text(text, style: const TextStyle(color: Color(0xFFD0DAE8), fontSize: 11, height: 1.55))),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(
+                color: Color(0xFFD0DAE8),
+                fontSize: 11,
+                height: 1.55,
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -2120,12 +2898,20 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Icon(Icons.info_outline_rounded, size: 14, color: AppColors.subtle),
+        const Icon(
+          Icons.info_outline_rounded,
+          size: 14,
+          color: AppColors.subtle,
+        ),
         const SizedBox(width: 8),
         const Expanded(
           child: Text(
             'StackSoothe is local-first. Demo mode uses built-in rules; Local AI mode requires Ollama. Fix Notebook and settings are stored locally under %LOCALAPPDATA%\\StackSoothe (unencrypted at rest; bearer tokens are never saved to disk).',
-            style: TextStyle(color: AppColors.subtle, fontSize: 10, height: 1.55),
+            style: TextStyle(
+              color: AppColors.subtle,
+              fontSize: 10,
+              height: 1.55,
+            ),
           ),
         ),
         const SizedBox(width: 15),
@@ -2155,7 +2941,15 @@ PlatformException: CONFIGURATION_NOT_FOUND''',
         children: [
           Icon(icon, size: 13, color: color),
           const SizedBox(width: 6),
-          Text(label, style: TextStyle(color: color, fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 0.65)),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: 9,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.65,
+            ),
+          ),
         ],
       ),
     );
@@ -2181,14 +2975,26 @@ class _SectionHeading extends StatelessWidget {
       children: [
         Icon(icon, size: 15, color: AppColors.accent),
         const SizedBox(width: 8),
-        Text(title, style: const TextStyle(color: AppColors.muted, fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 1.1)),
+        Text(
+          title,
+          style: const TextStyle(
+            color: AppColors.muted,
+            fontSize: 9,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 1.1,
+          ),
+        ),
       ],
     );
   }
 }
 
 class _ExplainerRow extends StatelessWidget {
-  const _ExplainerRow({required this.number, required this.title, required this.body});
+  const _ExplainerRow({
+    required this.number,
+    required this.title,
+    required this.body,
+  });
 
   final String number;
   final String title;
@@ -2203,17 +3009,40 @@ class _ExplainerRow extends StatelessWidget {
           width: 32,
           height: 32,
           alignment: Alignment.center,
-          decoration: BoxDecoration(color: const Color(0x229A8CFF), borderRadius: BorderRadius.circular(9)),
-          child: Text(number, style: const TextStyle(color: AppColors.accent, fontWeight: FontWeight.w900, fontSize: 10)),
+          decoration: BoxDecoration(
+            color: const Color(0x229A8CFF),
+            borderRadius: BorderRadius.circular(9),
+          ),
+          child: Text(
+            number,
+            style: const TextStyle(
+              color: AppColors.accent,
+              fontWeight: FontWeight.w900,
+              fontSize: 10,
+            ),
+          ),
         ),
         const SizedBox(width: 12),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
               const SizedBox(height: 5),
-              Text(body, style: const TextStyle(color: AppColors.muted, fontSize: 11, height: 1.5)),
+              Text(
+                body,
+                style: const TextStyle(
+                  color: AppColors.muted,
+                  fontSize: 11,
+                  height: 1.5,
+                ),
+              ),
             ],
           ),
         ),

@@ -82,17 +82,41 @@ export function createServer(customToken?: string, customPort?: number, ollamaBa
 
     // 5. Diagnosis route
     if (req.method === 'POST' && req.url === '/api/diagnose') {
-      // Concurrency lock
+      // Single-concurrency lock: HTTP 429 (BUSY) is an immediate reject (no queue, no wait, no background serialization)
       if (isInferring) {
         res.writeHead(429, { 'Content-Type': 'application/json' });
         res.end(
           JSON.stringify({
             error: 'BUSY',
-            message: 'Another diagnosis request is currently in progress.',
+            message: 'Another diagnosis request is currently in progress. StackSoothe operates single-concurrency without queuing.',
           })
         );
         return;
       }
+
+      // Bound request body upload deadline (15s)
+      const uploadTimeout = setTimeout(() => {
+        if (!res.headersSent) {
+          res.writeHead(408, { 'Content-Type': 'application/json' });
+          res.end(
+            JSON.stringify({
+              error: 'REQUEST_TIMEOUT',
+              message: 'Request body upload timed out after 15 seconds.',
+            })
+          );
+        }
+        req.destroy(new Error('UPLOAD_TIMEOUT'));
+      }, 15_000);
+
+      const abortController = new AbortController();
+
+      res.on('close', () => {
+        clearTimeout(uploadTimeout);
+        if (!res.writableEnded) {
+          abortController.abort();
+          isInferring = false;
+        }
+      });
 
       let body = '';
       let bytesReceived = 0;
@@ -100,6 +124,7 @@ export function createServer(customToken?: string, customPort?: number, ollamaBa
       req.on('data', (chunk: Buffer) => {
         bytesReceived += chunk.length;
         if (bytesReceived > MAX_BODY_BYTES) {
+          clearTimeout(uploadTimeout);
           req.destroy(new Error('REQUEST_BODY_TOO_LARGE'));
           if (!res.headersSent) {
             res.writeHead(413, { 'Content-Type': 'application/json' });
@@ -111,6 +136,7 @@ export function createServer(customToken?: string, customPort?: number, ollamaBa
       });
 
       req.on('end', async () => {
+        clearTimeout(uploadTimeout);
         if (bytesReceived > MAX_BODY_BYTES) return;
 
         let parsedJson: unknown;
@@ -143,24 +169,30 @@ export function createServer(customToken?: string, customPort?: number, ollamaBa
             sourceCode: inputValidation.data.sourceCode,
             model: inputValidation.data.model,
             baseUrl: ollamaBaseUrl,
+            signal: abortController.signal,
           });
 
-          res.writeHead(envelope.success ? 200 : 502, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify(envelope));
+          if (!res.writableEnded) {
+            res.writeHead(envelope.success ? 200 : 502, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(envelope));
+          }
         } catch (error) {
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(
-            JSON.stringify({
-              error: 'INTERNAL_ERROR',
-              message: error instanceof Error ? error.message : String(error),
-            })
-          );
+          if (!res.writableEnded) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(
+              JSON.stringify({
+                error: 'INTERNAL_ERROR',
+                message: error instanceof Error ? error.message : String(error),
+              })
+            );
+          }
         } finally {
           isInferring = false;
         }
       });
 
       req.on('error', () => {
+        clearTimeout(uploadTimeout);
         isInferring = false;
       });
 
@@ -180,6 +212,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const { server, port, host, token } = createServer();
   server.listen(port, host, () => {
     console.log(`StackSoothe diagnosis service running on http://${host}:${port}`);
-    console.log(`Bearer token configured: ${token.slice(0, 6)}...${token.slice(-4)}`);
+    if (token) {
+      console.log(`Bearer token configured: ${token.slice(0, 6)}...${token.slice(-4)}`);
+    } else {
+      console.log('Bearer token: disabled');
+    }
   });
 }

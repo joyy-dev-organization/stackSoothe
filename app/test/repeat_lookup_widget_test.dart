@@ -36,8 +36,9 @@ void main() {
     testWidgets(
       'Save starts UNVERIFIED (S3), user marks VERIFIED, exact repeat makes 0 model calls (S1), changed context flags stale similar match (S2), and relaunch preserves state',
       (WidgetTester tester) async {
-        final tempDir =
-            Directory.systemTemp.createTempSync('stacksoothe_m2_widget_');
+        final tempDir = Directory.systemTemp.createTempSync(
+          'stacksoothe_m2_widget_',
+        );
         addTearDown(() {
           try {
             if (tempDir.existsSync()) {
@@ -52,13 +53,14 @@ void main() {
         addTearDown(tester.view.resetDevicePixelRatio);
 
         final client = DiagnosisClient(
-          customHandler: ({
-            required String errorLog,
-            required String sourceCode,
-            required String model,
-          }) async {
-            return _fakeLocalModelDiagnosis();
-          },
+          customHandler:
+              ({
+                required String errorLog,
+                required String sourceCode,
+                required String model,
+              }) async {
+                return _fakeLocalModelDiagnosis();
+              },
         );
 
         final notebookStore = NotebookStore(storageDirectory: tempDir);
@@ -99,7 +101,10 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(client.invocationCount, equals(1));
-        expect(find.text('RenderFlex horizontal overflow in Row'), findsOneWidget);
+        expect(
+          find.text('RenderFlex horizontal overflow in Row'),
+          findsOneWidget,
+        );
 
         // Save diagnosis to Fix Notebook -> starts UNVERIFIED (S3)
         final saveButton = find.byKey(const Key('save_to_notebook_button'));
@@ -107,7 +112,10 @@ void main() {
         await tester.tap(saveButton);
         await tester.pumpAndSettle();
 
-        expect(find.byKey(const Key('status_unverified_badge')), findsOneWidget);
+        expect(
+          find.byKey(const Key('status_unverified_badge')),
+          findsOneWidget,
+        );
         expect(find.byKey(const Key('status_verified_badge')), findsNothing);
 
         // User enters verification command/outcome and explicitly clicks Mark Verified
@@ -128,7 +136,10 @@ void main() {
         await tester.tap(diagnoseBtn);
         await tester.pumpAndSettle();
 
-        expect(client.invocationCount, equals(1)); // Still 1! 0 new model requests!
+        expect(
+          client.invocationCount,
+          equals(1),
+        ); // Still 1! 0 new model requests!
         expect(find.byKey(const Key('recalled_exact_banner')), findsOneWidget);
         expect(find.byKey(const Key('status_verified_badge')), findsOneWidget);
 
@@ -145,7 +156,10 @@ void main() {
 
         // Still 0 new model calls while presenting the similar match review gate
         expect(client.invocationCount, equals(1));
-        expect(find.byKey(const Key('similar_match_review_card')), findsOneWidget);
+        expect(
+          find.byKey(const Key('similar_match_review_card')),
+          findsOneWidget,
+        );
         expect(find.byKey(const Key('recalled_exact_banner')), findsNothing);
 
         // User clicks Review Similar Past Fix (Marked Stale)
@@ -161,8 +175,12 @@ void main() {
         );
 
         // 4. Relaunch with brand-new store instances on same tempDir -> reloads persisted entry & settings
-        final relaunchedNotebookStore = NotebookStore(storageDirectory: tempDir);
-        final relaunchedSettingsStore = SettingsStore(storageDirectory: tempDir);
+        final relaunchedNotebookStore = NotebookStore(
+          storageDirectory: tempDir,
+        );
+        final relaunchedSettingsStore = SettingsStore(
+          storageDirectory: tempDir,
+        );
 
         await tester.pumpWidget(
           StackSootheApp(
@@ -178,7 +196,10 @@ void main() {
         await tester.tap(find.byKey(const Key('open_notebook_button')));
         await tester.pumpAndSettle();
 
-        expect(find.text('RenderFlex horizontal overflow in Row'), findsOneWidget);
+        expect(
+          find.text('RenderFlex horizontal overflow in Row'),
+          findsOneWidget,
+        );
         expect(find.text('VERIFIED'), findsOneWidget);
       },
     );
@@ -186,8 +207,9 @@ void main() {
     testWidgets(
       'Corrupted notebook.json displays recoverable warning banner on startup',
       (WidgetTester tester) async {
-        final tempDir = Directory.systemTemp
-            .createTempSync('stacksoothe_m2_corrupt_widget_');
+        final tempDir = Directory.systemTemp.createTempSync(
+          'stacksoothe_m2_corrupt_widget_',
+        );
         addTearDown(() {
           try {
             if (tempDir.existsSync()) {
@@ -201,8 +223,9 @@ void main() {
         addTearDown(tester.view.resetPhysicalSize);
         addTearDown(tester.view.resetDevicePixelRatio);
 
-        final notebookFile =
-            File('${tempDir.path}${Platform.pathSeparator}notebook.json');
+        final notebookFile = File(
+          '${tempDir.path}${Platform.pathSeparator}notebook.json',
+        );
         notebookFile.writeAsStringSync('{broken_json: [1, 2');
 
         await tester.pumpWidget(
@@ -213,7 +236,10 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        expect(find.byKey(const Key('corruption_warning_banner')), findsOneWidget);
+        expect(
+          find.byKey(const Key('corruption_warning_banner')),
+          findsOneWidget,
+        );
       },
     );
   });

@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:stacksoothe/models/diagnosis_result.dart';
+import 'package:stacksoothe/services/diagnosis_client.dart';
 
 void main() {
   group('DiagnosisResult.fromEnvelope', () {
@@ -73,11 +74,13 @@ void main() {
 
       expect(
         () => DiagnosisResult.fromEnvelope(envelope),
-        throwsA(isA<Exception>().having(
-          (e) => e.toString(),
-          'message',
-          contains('Model output failed schema validation.'),
-        )),
+        throwsA(
+          isA<Exception>().having(
+            (e) => e.toString(),
+            'message',
+            contains('Model output failed schema validation.'),
+          ),
+        ),
       );
     });
 
@@ -98,11 +101,13 @@ void main() {
 
       expect(
         () => DiagnosisResult.fromEnvelope(envelope),
-        throwsA(isA<Exception>().having(
-          (e) => e.toString(),
-          'message',
-          contains('Ollama diagnosis timed out after 120000ms'),
-        )),
+        throwsA(
+          isA<Exception>().having(
+            (e) => e.toString(),
+            'message',
+            contains('Ollama diagnosis timed out after 120000ms'),
+          ),
+        ),
       );
     });
 
@@ -123,12 +128,35 @@ void main() {
 
       expect(
         () => DiagnosisResult.fromEnvelope(envelope),
-        throwsA(isA<Exception>().having(
-          (e) => e.toString(),
-          'message',
-          contains('Could not reach Ollama at http://127.0.0.1:11434'),
-        )),
+        throwsA(
+          isA<Exception>().having(
+            (e) => e.toString(),
+            'message',
+            contains('Could not reach Ollama at http://127.0.0.1:11434'),
+          ),
+        ),
       );
+    });
+  });
+
+  group('DiagnosisClient loopback security and cancellation', () {
+    test('rejects non-loopback base URL with ArgumentError', () async {
+      final client = DiagnosisClient(baseUrl: 'https://remote-ai.example.com');
+      expect(
+        () => client.diagnose(errorLog: 'Test error', sourceCode: ''),
+        throwsA(
+          isA<ArgumentError>().having(
+            (e) => e.message.toString(),
+            'message',
+            contains('Private mode requires a loopback address'),
+          ),
+        ),
+      );
+    });
+
+    test('cancelPendingRequest does not crash when no request in flight', () {
+      final client = DiagnosisClient();
+      expect(client.cancelPendingRequest, returnsNormally);
     });
   });
 }
