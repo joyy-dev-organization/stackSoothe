@@ -4,7 +4,7 @@ Built for the Hacktoberfest Open-Source AI Challenge 2026 (Slow and Steady).
 
 ### Download & Quickstart
 
-1. Download `stacksoothe-v0.1.0-challenge-windows-x64.zip` and verify SHA-256 checksum.
+1. Download [**`stacksoothe-v0.1.0-challenge-windows-x64.zip`**](https://github.com/joyy-dev-organization/stackSoothe/releases/download/v0.1.0-challenge/stacksoothe-v0.1.0-challenge-windows-x64.zip) and verify SHA-256 checksum.
 2. Extract the archive and double-click `start-stacksoothe.bat`.
 3. Review `QUICKSTART.md` inside the package for full instructions and prerequisites.
 
