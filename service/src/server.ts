@@ -172,7 +172,7 @@ export function createServer(customToken?: string, customPort?: number, ollamaBa
     res.end(JSON.stringify({ error: 'NOT_FOUND', message: 'Route not found' }));
   });
 
-  return { server, token, port: PORT, host: HOST };
+  return { server, token, port, host: HOST };
 }
 
 // Start if executed directly

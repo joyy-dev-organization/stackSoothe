@@ -24,6 +24,12 @@ test('Sentry Synthetic Evidence Spike: Span Structure & Privacy Guarantees', asy
       inputTokens: 142,
       outputTokens: 88,
       durationMs: 1250,
+      timings: {
+        totalMs: 1200,
+        loadMs: 150,
+        promptEvalMs: 300,
+        evalMs: 750,
+      },
     });
 
     span = getLastSpan();
@@ -32,6 +38,11 @@ test('Sentry Synthetic Evidence Spike: Span Structure & Privacy Guarantees', asy
     assert.equal(span.attributes['gen_ai.usage.input_tokens'], 142);
     assert.equal(span.attributes['gen_ai.usage.output_tokens'], 88);
     assert.equal(span.attributes['gen_ai.duration_ms'], 1250);
+    assert.equal(span.attributes['ollama.timing.total_ms'], 1200);
+    assert.equal(span.attributes['ollama.timing.load_ms'], 150);
+    assert.equal(span.attributes['ollama.timing.prompt_eval_ms'], 300);
+    assert.equal(span.attributes['ollama.timing.eval_ms'], 750);
+    assert.equal(span.status, 'ok');
   });
 
   await t.test('payload inspection: strictly forbids prompt, code, or output text in span attributes', () => {
@@ -43,6 +54,10 @@ test('Sentry Synthetic Evidence Spike: Span Structure & Privacy Guarantees', asy
       inputTokens: 200,
       outputTokens: 150,
       durationMs: 980,
+      timings: {
+        totalMs: 950,
+        loadMs: 100,
+      },
     });
 
     const span = getLastSpan();
@@ -57,6 +72,10 @@ test('Sentry Synthetic Evidence Spike: Span Structure & Privacy Guarantees', asy
       'gen_ai.duration_ms',
       'gen_ai.usage.input_tokens',
       'gen_ai.usage.output_tokens',
+      'ollama.timing.total_ms',
+      'ollama.timing.load_ms',
+      'ollama.timing.prompt_eval_ms',
+      'ollama.timing.eval_ms',
       'error.type',
     ]);
 
@@ -76,7 +95,7 @@ test('Sentry Synthetic Evidence Spike: Span Structure & Privacy Guarantees', asy
     assert.equal(serialized.includes('likely_cause'), false);
   });
 
-  await t.test('error span captures low-cardinality error.type and duration only', () => {
+  await t.test('error span captures low-cardinality error.type, tokens, and duration', () => {
     const { sink, getLastSpan } = createSentrySpanSink();
 
     sink.onStart?.({ model: 'qwen2.5-coder:3b', provider: 'ollama' });
@@ -91,5 +110,6 @@ test('Sentry Synthetic Evidence Spike: Span Structure & Privacy Guarantees', asy
     assert.equal(span.attributes['error.type'], 'HTTP_502');
     assert.equal(span.attributes['gen_ai.duration_ms'], 310);
     assert.equal('raw_error' in span.attributes, false);
+    assert.equal(span.status, 'HTTP_502');
   });
 });

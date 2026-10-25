@@ -1,5 +1,12 @@
 import type { DiagnosisData } from '../schemas/diagnosis.schema.js';
 
+export interface DiagnosisTimings {
+  total_ms?: number;
+  load_ms?: number;
+  prompt_eval_ms?: number;
+  eval_ms?: number;
+}
+
 export interface DiagnosisEnvelope {
   success: boolean;
   data?: DiagnosisData;
@@ -18,6 +25,7 @@ export interface DiagnosisEnvelope {
       input?: number;
       output?: number;
     };
+    timings?: DiagnosisTimings;
   };
 }
 
@@ -29,6 +37,7 @@ export interface OllamaChatResponse {
     content: string;
   };
   done: boolean;
+  done_reason?: string;
   total_duration?: number;
   load_duration?: number;
   prompt_eval_count?: number;

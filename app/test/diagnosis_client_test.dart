@@ -80,5 +80,55 @@ void main() {
         )),
       );
     });
+
+    test('propagates OLLAMA_TIMEOUT error message correctly', () {
+      final envelope = {
+        'success': false,
+        'error': {
+          'code': 'OLLAMA_TIMEOUT',
+          'message': 'Ollama diagnosis timed out after 120000ms',
+        },
+        'meta': {
+          'model': 'qwen3:1.7b',
+          'raw_valid': false,
+          'repaired': false,
+          'duration_ms': 120000,
+        },
+      };
+
+      expect(
+        () => DiagnosisResult.fromEnvelope(envelope),
+        throwsA(isA<Exception>().having(
+          (e) => e.toString(),
+          'message',
+          contains('Ollama diagnosis timed out after 120000ms'),
+        )),
+      );
+    });
+
+    test('propagates OLLAMA_UNREACHABLE error message correctly', () {
+      final envelope = {
+        'success': false,
+        'error': {
+          'code': 'OLLAMA_UNREACHABLE',
+          'message': 'Could not reach Ollama at http://127.0.0.1:11434',
+        },
+        'meta': {
+          'model': 'qwen3:1.7b',
+          'raw_valid': false,
+          'repaired': false,
+          'duration_ms': 15,
+        },
+      };
+
+      expect(
+        () => DiagnosisResult.fromEnvelope(envelope),
+        throwsA(isA<Exception>().having(
+          (e) => e.toString(),
+          'message',
+          contains('Could not reach Ollama at http://127.0.0.1:11434'),
+        )),
+      );
+    });
   });
 }

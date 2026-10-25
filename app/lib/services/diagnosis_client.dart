@@ -78,10 +78,17 @@ class DiagnosisClient {
       if (response.statusCode < 200 || response.statusCode >= 300) {
         try {
           final errJson = jsonDecode(responseText);
-          if (errJson is Map && errJson['message'] != null) {
-            throw Exception(errJson['message']);
+          if (errJson is Map) {
+            if (errJson['error'] is Map && errJson['error']['message'] != null) {
+              throw Exception(errJson['error']['message'].toString());
+            }
+            if (errJson['message'] != null) {
+              throw Exception(errJson['message'].toString());
+            }
           }
-        } catch (_) {}
+        } on FormatException {
+          // Response body was not JSON; fall through
+        }
         throw Exception('Service returned HTTP ${response.statusCode}');
       }
 

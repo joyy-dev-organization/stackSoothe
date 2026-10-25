@@ -1,0 +1,113 @@
+{
+  "run_id": "m3-evidence-1792886913862",
+  "timestamp_iso": "2026-10-25T00:08:33.862Z",
+  "hardware": "Windows 11 x64, 16 GB RAM, Intel UHD Graphics",
+  "platform": "Windows Desktop / Node.js 24",
+  "active_model": "qwen3:1.7b",
+  "total_cases": 4,
+  "paths": {
+    "success": {
+      "path_id": "PATH_SUCCESS",
+      "name": "Real Model Inference (Fixture D1)",
+      "execution_type": "real-model",
+      "model": "qwen3:1.7b",
+      "success": true,
+      "duration_ms": 43324,
+      "input_tokens": 402,
+      "output_tokens": 446,
+      "timings": {
+        "total_ms": 43285,
+        "load_ms": 8,
+        "prompt_eval_ms": 115,
+        "eval_ms": 43113
+      },
+      "span_attributes": {
+        "gen_ai.operation.name": "chat",
+        "gen_ai.provider.name": "ollama",
+        "gen_ai.request.model": "qwen3:1.7b",
+        "gen_ai.response.model": "qwen3:1.7b",
+        "gen_ai.duration_ms": 43324,
+        "gen_ai.usage.input_tokens": 402,
+        "gen_ai.usage.output_tokens": 446,
+        "ollama.timing.total_ms": 43285,
+        "ollama.timing.load_ms": 8,
+        "ollama.timing.prompt_eval_ms": 115,
+        "ollama.timing.eval_ms": 43113
+      },
+      "local_api_fee": "$0 external per-token fee (local inference; electricity/hardware costs non-zero)"
+    },
+    "unavailable": {
+      "path_id": "PATH_UNAVAILABLE",
+      "name": "Unreachable Model Daemon (Port 11439)",
+      "execution_type": "real-network-failure",
+      "model": "qwen3:1.7b",
+      "success": false,
+      "error_code": "OLLAMA_UNREACHABLE",
+      "error_type": "MODEL_UNAVAILABLE",
+      "duration_ms": 8,
+      "span_attributes": {
+        "gen_ai.operation.name": "chat",
+        "gen_ai.provider.name": "ollama",
+        "gen_ai.request.model": "qwen3:1.7b",
+        "gen_ai.response.model": "qwen3:1.7b",
+        "error.type": "MODEL_UNAVAILABLE",
+        "gen_ai.duration_ms": 8
+      },
+      "local_api_fee": "$0 external per-token fee (local inference)"
+    },
+    "invalid_schema": {
+      "path_id": "PATH_INVALID_SCHEMA",
+      "name": "Invalid Schema & Unrepairable Output (Mock HTTP)",
+      "execution_type": "mock-http",
+      "model": "qwen3:1.7b",
+      "success": false,
+      "error_code": "SCHEMA_VALIDATION_ERROR",
+      "error_type": "SCHEMA_VALIDATION_FAILED",
+      "duration_ms": 19,
+      "input_tokens": 64,
+      "output_tokens": 92,
+      "timings": {
+        "total_ms": 620,
+        "load_ms": 80,
+        "prompt_eval_ms": 180,
+        "eval_ms": 360
+      },
+      "span_attributes": {
+        "gen_ai.operation.name": "chat",
+        "gen_ai.provider.name": "ollama",
+        "gen_ai.request.model": "qwen3:1.7b",
+        "gen_ai.response.model": "qwen3:1.7b",
+        "error.type": "SCHEMA_VALIDATION_FAILED",
+        "gen_ai.duration_ms": 19,
+        "gen_ai.usage.input_tokens": 64,
+        "gen_ai.usage.output_tokens": 92,
+        "ollama.timing.total_ms": 620,
+        "ollama.timing.load_ms": 80,
+        "ollama.timing.prompt_eval_ms": 180,
+        "ollama.timing.eval_ms": 360
+      },
+      "local_api_fee": "$0 external per-token fee (mock test)"
+    },
+    "timeout": {
+      "path_id": "PATH_TIMEOUT",
+      "name": "Diagnosis Timeout Abort (Mock HTTP 150ms)",
+      "execution_type": "mock-http",
+      "model": "qwen3:1.7b",
+      "success": false,
+      "error_code": "OLLAMA_TIMEOUT",
+      "error_type": "TIMEOUT",
+      "duration_ms": 171,
+      "span_attributes": {
+        "gen_ai.operation.name": "chat",
+        "gen_ai.provider.name": "ollama",
+        "gen_ai.request.model": "qwen3:1.7b",
+        "gen_ai.response.model": "qwen3:1.7b",
+        "error.type": "TIMEOUT",
+        "gen_ai.duration_ms": 171
+      },
+      "local_api_fee": "$0 external per-token fee (mock test)"
+    }
+  },
+  "privacy_allowlist_verified": true,
+  "private_mode_exporter_free": true
+}

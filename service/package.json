@@ -10,7 +10,9 @@
     "dev": "node --experimental-strip-types src/server.ts",
     "test": "node --test --experimental-strip-types test/*.test.ts",
     "test:unit": "node --test --experimental-strip-types test/schema.test.ts test/security.test.ts",
-    "test:sentry-spike": "node --test --experimental-strip-types test/sentry-spike.test.ts"
+    "test:sentry-spike": "node --test --experimental-strip-types test/sentry-spike.test.ts",
+    "test:defect": "node --test --experimental-strip-types test/defect-reproducer.test.ts",
+    "test:evidence": "node --test --experimental-strip-types test/evidence-runner.test.ts"
   },
   "dependencies": {
     "zod": "^4.6.7"
