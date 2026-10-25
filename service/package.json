@@ -14,7 +14,10 @@
     "test:defect": "node --test --experimental-strip-types test/defect-reproducer.test.ts",
     "test:evidence": "node --test --experimental-strip-types test/evidence-runner.test.ts",
     "test:hardening": "node --test --experimental-strip-types test/m4-hardening.test.ts",
-    "test:privacy": "node --test --experimental-strip-types test/privacy-wan.test.ts"
+    "test:privacy": "node --test --experimental-strip-types test/privacy-wan.test.ts",
+    "test:eval-failure": "node --test --experimental-strip-types test/deliberate-failure.test.ts",
+    "eval:12case": "node --experimental-strip-types src/eval/run-12case-eval.ts",
+    "eval:report": "node --experimental-strip-types src/eval/generate-eval-report.ts"
   },
   "dependencies": {
     "zod": "^4.6.7"

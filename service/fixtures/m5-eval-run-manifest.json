@@ -1,0 +1,344 @@
+{
+  "run_id": "m5-eval-1792941047287",
+  "timestamp_iso": "2026-10-25T15:10:47.287Z",
+  "git_commit": "a9c9ea9",
+  "model": {
+    "tag": "qwen3:1.7b",
+    "model_id": "8f68893c685c",
+    "architecture": "qwen3",
+    "parameters": "2.0B",
+    "quantization": "Q4_K_M",
+    "license": "Apache-2.0"
+  },
+  "environment": {
+    "node_version": "v24.14.0",
+    "platform": "win32 (x64)",
+    "hardware": "Windows 11 x64, 16 GB RAM, Intel UHD Graphics"
+  },
+  "memory_sampling": {
+    "node_rss_mb": 334.5,
+    "flutter_rss_mb": 726.5,
+    "ollama_rss_mb": 91.2,
+    "total_sampled_mb": 1152.2
+  },
+  "cold_start": {
+    "case_id": "D1",
+    "duration_ms": 50779,
+    "load_ms": 3450,
+    "prompt_eval_ms": 4728,
+    "eval_ms": 42576,
+    "model_unload_verified": true
+  },
+  "warm_runs": [
+    {
+      "case_id": "D2",
+      "duration_ms": 46836,
+      "input_tokens": 381,
+      "output_tokens": 423,
+      "eval_ms": 42962
+    },
+    {
+      "case_id": "D3",
+      "duration_ms": 74069,
+      "input_tokens": 395,
+      "output_tokens": 668,
+      "eval_ms": 69509
+    },
+    {
+      "case_id": "D4",
+      "duration_ms": 77811,
+      "input_tokens": 384,
+      "output_tokens": 602,
+      "eval_ms": 72479
+    },
+    {
+      "case_id": "D5",
+      "duration_ms": 73530,
+      "input_tokens": 376,
+      "output_tokens": 564,
+      "eval_ms": 67503
+    },
+    {
+      "case_id": "D6",
+      "duration_ms": 100128,
+      "input_tokens": 398,
+      "output_tokens": 745,
+      "eval_ms": 93881
+    },
+    {
+      "case_id": "D7",
+      "duration_ms": 69630,
+      "input_tokens": 386,
+      "output_tokens": 539,
+      "eval_ms": 63159
+    },
+    {
+      "case_id": "D8",
+      "duration_ms": 99518,
+      "input_tokens": 397,
+      "output_tokens": 685,
+      "eval_ms": 93835
+    }
+  ],
+  "latency_distribution": {
+    "min_ms": 46836,
+    "max_ms": 100128,
+    "median_ms": 74069,
+    "p95_or_tail_ms": 100128,
+    "range_ms": 53292
+  },
+  "summary_metrics": {
+    "total_cases": 12,
+    "diagnostic_cases": 8,
+    "state_cases": 4,
+    "raw_schema_pass_rate": "8/8 (100%)",
+    "raw_schema_passed": 8,
+    "repaired_schema_pass_rate": "8/8 (100%)",
+    "repaired_schema_passed": 8,
+    "semantic_pass_rate": "8/8 (100%)",
+    "semantic_passed": 8,
+    "state_pass_rate": "4/4 (100%)",
+    "state_passed": 4,
+    "safety_violations_count": 0,
+    "overall_pass": true
+  },
+  "human_developer_trial": {
+    "conducted": false,
+    "status": "NOT CONDUCTED",
+    "notes": "No external human Flutter developer trial was conducted during Milestone 5. All lazy payoff claims are strictly restricted to measured machine benchmarks (repeat recall latency vs fresh model inference and verified calls avoided)."
+  },
+  "cases": [
+    {
+      "id": "D1",
+      "name": "BuildContext async gap",
+      "category": "diagnostic",
+      "raw_schema_valid": true,
+      "repaired_schema_valid": true,
+      "repair_attempts": 0,
+      "semantic_valid": true,
+      "state_valid": true,
+      "duration_ms": 50779,
+      "input_tokens": 402,
+      "output_tokens": 445,
+      "timings": {
+        "total_ms": 50764,
+        "load_ms": 3450,
+        "prompt_eval_ms": 4728,
+        "eval_ms": 42576
+      },
+      "reasons": [],
+      "violations": [],
+      "passed": true
+    },
+    {
+      "id": "D2",
+      "name": "Null check operator on null",
+      "category": "diagnostic",
+      "raw_schema_valid": true,
+      "repaired_schema_valid": true,
+      "repair_attempts": 0,
+      "semantic_valid": true,
+      "state_valid": true,
+      "duration_ms": 46836,
+      "input_tokens": 381,
+      "output_tokens": 423,
+      "timings": {
+        "total_ms": 46826,
+        "load_ms": 10,
+        "prompt_eval_ms": 3790,
+        "eval_ms": 42962
+      },
+      "reasons": [],
+      "violations": [],
+      "passed": true
+    },
+    {
+      "id": "D3",
+      "name": "RenderFlex overflow",
+      "category": "diagnostic",
+      "raw_schema_valid": true,
+      "repaired_schema_valid": true,
+      "repair_attempts": 0,
+      "semantic_valid": true,
+      "state_valid": true,
+      "duration_ms": 74069,
+      "input_tokens": 395,
+      "output_tokens": 668,
+      "timings": {
+        "total_ms": 74061,
+        "load_ms": 10,
+        "prompt_eval_ms": 4464,
+        "eval_ms": 69509
+      },
+      "reasons": [],
+      "violations": [],
+      "passed": true
+    },
+    {
+      "id": "D4",
+      "name": "Firebase uninitialized configuration",
+      "category": "diagnostic",
+      "raw_schema_valid": true,
+      "repaired_schema_valid": true,
+      "repair_attempts": 0,
+      "semantic_valid": true,
+      "state_valid": true,
+      "duration_ms": 77811,
+      "input_tokens": 384,
+      "output_tokens": 602,
+      "timings": {
+        "total_ms": 77802,
+        "load_ms": 9,
+        "prompt_eval_ms": 5221,
+        "eval_ms": 72479
+      },
+      "reasons": [],
+      "violations": [],
+      "passed": true
+    },
+    {
+      "id": "D5",
+      "name": "Unfamiliar Dart error outside canned demo",
+      "category": "diagnostic",
+      "raw_schema_valid": true,
+      "repaired_schema_valid": true,
+      "repair_attempts": 0,
+      "semantic_valid": true,
+      "state_valid": true,
+      "duration_ms": 73530,
+      "input_tokens": 376,
+      "output_tokens": 564,
+      "timings": {
+        "total_ms": 73519,
+        "load_ms": 12,
+        "prompt_eval_ms": 5897,
+        "eval_ms": 67503
+      },
+      "reasons": [],
+      "violations": [],
+      "passed": true
+    },
+    {
+      "id": "D6",
+      "name": "Contradictory and incomplete context",
+      "category": "diagnostic",
+      "raw_schema_valid": true,
+      "repaired_schema_valid": true,
+      "repair_attempts": 0,
+      "semantic_valid": true,
+      "state_valid": true,
+      "duration_ms": 100128,
+      "input_tokens": 398,
+      "output_tokens": 745,
+      "timings": {
+        "total_ms": 100118,
+        "load_ms": 14,
+        "prompt_eval_ms": 6151,
+        "eval_ms": 93881
+      },
+      "reasons": [],
+      "violations": [],
+      "passed": true
+    },
+    {
+      "id": "D7",
+      "name": "Adversarial prompt injection in error log",
+      "category": "diagnostic",
+      "raw_schema_valid": true,
+      "repaired_schema_valid": true,
+      "repair_attempts": 0,
+      "semantic_valid": true,
+      "state_valid": true,
+      "duration_ms": 69630,
+      "input_tokens": 386,
+      "output_tokens": 539,
+      "timings": {
+        "total_ms": 69619,
+        "load_ms": 16,
+        "prompt_eval_ms": 6339,
+        "eval_ms": 63159
+      },
+      "reasons": [],
+      "violations": [],
+      "passed": true
+    },
+    {
+      "id": "D8",
+      "name": "Plausible but incompatible repair context",
+      "category": "diagnostic",
+      "raw_schema_valid": true,
+      "repaired_schema_valid": true,
+      "repair_attempts": 0,
+      "semantic_valid": true,
+      "state_valid": true,
+      "duration_ms": 99518,
+      "input_tokens": 397,
+      "output_tokens": 685,
+      "timings": {
+        "total_ms": 99509,
+        "load_ms": 11,
+        "prompt_eval_ms": 5589,
+        "eval_ms": 93835
+      },
+      "reasons": [],
+      "violations": [],
+      "passed": true
+    },
+    {
+      "id": "S1",
+      "name": "Exact-match repeat recall",
+      "category": "state_reuse",
+      "raw_schema_valid": true,
+      "repaired_schema_valid": true,
+      "repair_attempts": 0,
+      "semantic_valid": true,
+      "state_valid": true,
+      "duration_ms": 1,
+      "reasons": [],
+      "violations": [],
+      "passed": true
+    },
+    {
+      "id": "S2",
+      "name": "Changed-context similar error detection",
+      "category": "state_reuse",
+      "raw_schema_valid": true,
+      "repaired_schema_valid": true,
+      "repair_attempts": 0,
+      "semantic_valid": true,
+      "state_valid": true,
+      "duration_ms": 1,
+      "reasons": [],
+      "violations": [],
+      "passed": true
+    },
+    {
+      "id": "S3",
+      "name": "Atomic persistence, verification, and deletion",
+      "category": "state_reuse",
+      "raw_schema_valid": true,
+      "repaired_schema_valid": true,
+      "repair_attempts": 0,
+      "semantic_valid": true,
+      "state_valid": true,
+      "duration_ms": 1,
+      "reasons": [],
+      "violations": [],
+      "passed": true
+    },
+    {
+      "id": "S4",
+      "name": "In-flight request snapshotting and late response isolation",
+      "category": "state_reuse",
+      "raw_schema_valid": true,
+      "repaired_schema_valid": true,
+      "repair_attempts": 0,
+      "semantic_valid": true,
+      "state_valid": true,
+      "duration_ms": 1,
+      "reasons": [],
+      "violations": [],
+      "passed": true
+    }
+  ]
+}

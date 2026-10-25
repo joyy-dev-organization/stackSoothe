@@ -20,6 +20,7 @@ export interface DiagnosisEnvelope {
     prompt_version: string;
     raw_valid: boolean;
     repaired: boolean;
+    raw_content?: string;
     duration_ms: number;
     tokens?: {
       input?: number;

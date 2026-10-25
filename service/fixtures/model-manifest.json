@@ -1,17 +1,22 @@
 {
-  "activeModel": "qwen2.5-coder:3b",
-  "license": "Qwen Research License",
-  "licenseNotice": "Check Qwen terms for commercial/distribution constraints. StackSoothe does not bundle model weights.",
+  "activeModel": "qwen3:1.7b",
+  "modelId": "8f68893c685c",
+  "architecture": "qwen3",
+  "parameter_size": "2.0B",
+  "quantization": "Q4_K_M",
+  "license": "Apache-2.0",
+  "licenseNotice": "Apache License 2.0. Permissive open-weight model. StackSoothe runs inference locally via Ollama and does not bundle model weights.",
   "ollamaEndpoints": [
     "/api/tags",
-    "/api/chat"
+    "/api/chat",
+    "/api/generate"
   ],
   "defaultBaseUrl": "http://127.0.0.1:11434",
-  "parameters": {
+  "inference_options": {
     "temperature": 0.2,
     "format": "json",
     "stream": false
   },
-  "contextWindow": 4096,
+  "contextWindow": 40960,
   "hardwareTarget": "Windows 11 x64, 16 GB RAM, Intel UHD Graphics"
 }

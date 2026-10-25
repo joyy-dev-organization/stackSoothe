@@ -1,6 +1,6 @@
 {
-  "run_id": "m3-evidence-1792929577456",
-  "timestamp_iso": "2026-10-25T11:59:37.456Z",
+  "run_id": "m3-evidence-1792941300088",
+  "timestamp_iso": "2026-10-25T15:15:00.088Z",
   "hardware": "Windows 11 x64, 16 GB RAM, Intel UHD Graphics",
   "platform": "Windows Desktop / Node.js 24",
   "active_model": "qwen3:1.7b",
@@ -12,27 +12,27 @@
       "execution_type": "real-model",
       "model": "qwen3:1.7b",
       "success": true,
-      "duration_ms": 56513,
+      "duration_ms": 90772,
       "input_tokens": 402,
-      "output_tokens": 471,
+      "output_tokens": 534,
       "timings": {
-        "total_ms": 56460,
-        "load_ms": 11,
-        "prompt_eval_ms": 140,
-        "eval_ms": 56237
+        "total_ms": 90613,
+        "load_ms": 39,
+        "prompt_eval_ms": 170,
+        "eval_ms": 90296
       },
       "span_attributes": {
         "gen_ai.operation.name": "chat",
         "gen_ai.provider.name": "ollama",
         "gen_ai.request.model": "qwen3:1.7b",
         "gen_ai.response.model": "qwen3:1.7b",
-        "gen_ai.duration_ms": 56513,
+        "gen_ai.duration_ms": 90772,
         "gen_ai.usage.input_tokens": 402,
-        "gen_ai.usage.output_tokens": 471,
-        "ollama.timing.total_ms": 56460,
-        "ollama.timing.load_ms": 11,
-        "ollama.timing.prompt_eval_ms": 140,
-        "ollama.timing.eval_ms": 56237
+        "gen_ai.usage.output_tokens": 534,
+        "ollama.timing.total_ms": 90613,
+        "ollama.timing.load_ms": 39,
+        "ollama.timing.prompt_eval_ms": 170,
+        "ollama.timing.eval_ms": 90296
       },
       "local_api_fee": "$0 external per-token fee (local inference; electricity/hardware costs non-zero)"
     },
@@ -44,14 +44,14 @@
       "success": false,
       "error_code": "OLLAMA_UNREACHABLE",
       "error_type": "MODEL_UNAVAILABLE",
-      "duration_ms": 8,
+      "duration_ms": 14,
       "span_attributes": {
         "gen_ai.operation.name": "chat",
         "gen_ai.provider.name": "ollama",
         "gen_ai.request.model": "qwen3:1.7b",
         "gen_ai.response.model": "qwen3:1.7b",
         "error.type": "MODEL_UNAVAILABLE",
-        "gen_ai.duration_ms": 8
+        "gen_ai.duration_ms": 14
       },
       "local_api_fee": "$0 external per-token fee (local inference)"
     },
@@ -63,7 +63,7 @@
       "success": false,
       "error_code": "SCHEMA_VALIDATION_ERROR",
       "error_type": "SCHEMA_VALIDATION_FAILED",
-      "duration_ms": 31,
+      "duration_ms": 40,
       "input_tokens": 64,
       "output_tokens": 92,
       "timings": {
@@ -78,7 +78,7 @@
         "gen_ai.request.model": "qwen3:1.7b",
         "gen_ai.response.model": "qwen3:1.7b",
         "error.type": "SCHEMA_VALIDATION_FAILED",
-        "gen_ai.duration_ms": 31,
+        "gen_ai.duration_ms": 40,
         "gen_ai.usage.input_tokens": 64,
         "gen_ai.usage.output_tokens": 92,
         "ollama.timing.total_ms": 620,
@@ -96,14 +96,14 @@
       "success": false,
       "error_code": "OLLAMA_TIMEOUT",
       "error_type": "TIMEOUT",
-      "duration_ms": 165,
+      "duration_ms": 166,
       "span_attributes": {
         "gen_ai.operation.name": "chat",
         "gen_ai.provider.name": "ollama",
         "gen_ai.request.model": "qwen3:1.7b",
         "gen_ai.response.model": "qwen3:1.7b",
         "error.type": "TIMEOUT",
-        "gen_ai.duration_ms": 165
+        "gen_ai.duration_ms": 166
       },
       "local_api_fee": "$0 external per-token fee (mock test)"
     }

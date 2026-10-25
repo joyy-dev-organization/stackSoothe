@@ -305,6 +305,7 @@ export async function runDiagnosis(options: DiagnosisOptions): Promise<Diagnosis
         prompt_version: PROMPT_VERSION,
         raw_valid: true,
         repaired: false,
+        raw_content: rawContent,
         duration_ms: durationMs,
         tokens: {
           input: chatResponse.prompt_eval_count,
@@ -380,6 +381,7 @@ export async function runDiagnosis(options: DiagnosisOptions): Promise<Diagnosis
             prompt_version: PROMPT_VERSION,
             raw_valid: false,
             repaired: true,
+            raw_content: repairedContent,
             duration_ms: durationMs,
             tokens: {
               input: totalInput,
@@ -418,6 +420,7 @@ export async function runDiagnosis(options: DiagnosisOptions): Promise<Diagnosis
       prompt_version: PROMPT_VERSION,
       raw_valid: false,
       repaired: false,
+      raw_content: rawContent,
       duration_ms: durationMs,
       tokens: {
         input: chatResponse.prompt_eval_count,

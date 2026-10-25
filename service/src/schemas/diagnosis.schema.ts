@@ -1,9 +1,18 @@
 import { z } from 'zod';
 
-export const SeverityEnum = z.enum(['low', 'medium', 'high']);
+export const SeverityEnum = z.preprocess(
+  (val) => (typeof val === 'string' ? val.toLowerCase().trim() : val),
+  z.enum(['low', 'medium', 'high'])
+);
 export type Severity = z.infer<typeof SeverityEnum>;
 
-export const ConfidenceEnum = z.enum(['Low', 'Medium', 'High']);
+export const ConfidenceEnum = z.preprocess(
+  (val) =>
+    typeof val === 'string'
+      ? val.trim().charAt(0).toUpperCase() + val.trim().slice(1).toLowerCase()
+      : val,
+  z.enum(['Low', 'Medium', 'High'])
+);
 export type Confidence = z.infer<typeof ConfidenceEnum>;
 
 export const DiagnosisSchema = z.object({
