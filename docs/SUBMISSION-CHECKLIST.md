@@ -22,7 +22,7 @@
 | **M5 Evaluation Ledger** | Empirical metrics backing all claims | 100% schema validity, 1.98ms recall, 100% redundant call avoidance | **PASS** |
 | **Sentry Partner Integration** | Documented GenAI spans & defect story | `op: gen_ai.chat`, `evidence/sentry-spike.ts`, `test/defect-reproducer.test.ts` | **PASS** |
 | **Privacy Guarantees** | Exporter-free private app mode | Zero Sentry initialization in normal app; payload inspection verified | **PASS** |
-| **DEV Post Draft** | Conforms to official W3 template | `docs/DEV-SUBMISSION-DRAFT.md` authored with required tags | **PASS** |
+| **DEV Post Draft** | Conforms to official W3 template | Created on DEV (ID: `4918836`): [Edit Draft on DEV](https://dev.to/joyy-dev/i-got-tired-of-fixing-the-same-flutter-error-twice-so-i-built-stacksoothe-2152-temp-slug-6440449/edit) | **PASS (Draft Created)** |
 | **Demonstration Video** | Working deployed demo or video | Storyboard in `docs/demo-video-script.md`; **Recording pending owner capture** | **PENDING (Owner)** |
 | **Agent Sessions** | Reviewed public session slice (optional) | 6 sessions curated via DevRelay; **Kept private for owner review per instruction** | **PRIVATE (Approved)** |
 
@@ -53,8 +53,8 @@ To complete submission before the official cutoff (07:59 Africa/Lagos):
    - Paste the video link into [projects/stacksoothe/docs/DEV-SUBMISSION-DRAFT.md](file:///c:/Users/Ladydiamond/Desktop/projects/hackerton/ladydiamond-hacktoberfest/projects/stacksoothe/docs/DEV-SUBMISSION-DRAFT.md).
 3. **(Optional) Agent Session Review**:
    - If you choose to publish an agent session, inspect your desired session on DEV, set it to public, and insert `{% agent_session <id> %}` into the draft. If you prefer to keep sessions private, leave as is (sessions are optional).
-4. **Publish DEV Article**:
-   - Copy markdown from [projects/stacksoothe/docs/DEV-SUBMISSION-DRAFT.md](file:///c:/Users/Ladydiamond/Desktop/projects/hackerton/ladydiamond-hacktoberfest/projects/stacksoothe/docs/DEV-SUBMISSION-DRAFT.md).
-   - Create new post on [dev.to/new](https://dev.to/new).
-   - Ensure tags include `devchallenge` and `hf26challenge`.
-   - Publish article and test opening the link in a private/incognito browser window.
+4. **Review & Publish DEV Article**:
+   - The draft has already been created for your account: **[Open StackSoothe Draft on DEV](https://dev.to/joyy-dev/i-got-tired-of-fixing-the-same-flutter-error-twice-so-i-built-stacksoothe-2152-temp-slug-6440449/edit)**.
+   - Insert your video demo link.
+   - Verify that tags include `devchallenge` and `hf26challenge`.
+   - Toggle to **Publish** and test opening the public link in a private/incognito browser window.
